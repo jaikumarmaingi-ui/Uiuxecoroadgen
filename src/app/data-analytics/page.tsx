@@ -13,7 +13,7 @@ export default function DataAnalyticsPage() {
   const sensors = ROAD_SEGMENTS.flatMap((s) =>
     s.landmarks
       .filter((l) => l.type === "weather-station")
-      .map((l) => ({ id: `${s.id}-station`, label: `${s.region} Weather Station`, online: s.dataConfidence !== "LOW" })),
+      .map(() => ({ id: `${s.id}-station`, label: `${s.region} Weather Station`, online: s.dataConfidence !== "LOW" })),
   );
 
   return (

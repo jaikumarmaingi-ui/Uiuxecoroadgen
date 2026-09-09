@@ -13,13 +13,18 @@ export function GlobalSearch() {
   const router = useRouter();
   const results = runGlobalSearch(query);
 
+  function closeSearch() {
+    setOpen(false);
+    setQuery("");
+  }
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setOpen(true);
       }
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") closeSearch();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -27,19 +32,18 @@ export function GlobalSearch() {
 
   useEffect(() => {
     if (open) setTimeout(() => inputRef.current?.focus(), 30);
-    else setQuery("");
   }, [open]);
 
   function go(r: SearchResult) {
     router.push(r.href);
-    setOpen(false);
+    closeSearch();
   }
 
   return (
     <>
       <button
         onClick={() => setOpen(true)}
-        className="flex w-full max-w-md items-center gap-2.5 rounded-lg border border-hairline-strong bg-white/[0.03] px-3 py-2 text-left text-sm text-text-tertiary transition-colors hover:border-cyan/30 hover:text-text-secondary"
+        className="flex w-full min-w-0 max-w-md items-center gap-2.5 rounded-lg border border-hairline-strong bg-white/[0.03] px-3 py-2 text-left text-sm text-text-tertiary transition-colors hover:border-cyan/30 hover:text-text-secondary"
       >
         <Search className="h-4 w-4 shrink-0" />
         <span className="flex-1 truncate">Search roads, segments, KM, reports…</span>
@@ -49,7 +53,7 @@ export function GlobalSearch() {
       </button>
 
       {open && (
-        <div className="fixed inset-0 z-[60] flex items-start justify-center bg-black/70 px-4 pt-[12vh]" onClick={() => setOpen(false)}>
+        <div className="fixed inset-0 z-[60] flex items-start justify-center bg-black/70 px-4 pt-[12vh]" onClick={closeSearch}>
           <div
             className="glass-panel w-full max-w-xl rounded-xl border border-hairline-strong shadow-2xl"
             onClick={(e) => e.stopPropagation()}

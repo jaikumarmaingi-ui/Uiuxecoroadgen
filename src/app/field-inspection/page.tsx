@@ -104,7 +104,7 @@ export default function FieldInspectionPage() {
               >
                 <Icon className="h-3.5 w-3.5" />
               </div>
-              <span className="text-[8px] uppercase tracking-wide text-text-tertiary">{s.label}</span>
+              <span className="text-[9px] uppercase tracking-wide text-text-tertiary whitespace-nowrap">{s.label}</span>
             </div>
           );
         })}

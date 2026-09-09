@@ -5,7 +5,7 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { Sparkline } from "@/components/shared/sparkline";
 import { cn } from "@/lib/utils";
 import { Info, TrendingDown, TrendingUp, Minus } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 type Tone = "green" | "cyan" | "amber" | "red" | "blue" | "neutral";
 
@@ -29,10 +29,7 @@ const toneText: Record<Tone, string> = {
 
 function useCountUp(target: number, decimals = 0) {
   const [value, setValue] = useState(0);
-  const started = useRef(false);
   useEffect(() => {
-    if (started.current) return;
-    started.current = true;
     const duration = 900;
     const start = performance.now();
     let raf: number;

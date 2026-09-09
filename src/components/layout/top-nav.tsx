@@ -26,7 +26,7 @@ export function TopNav({ onMenuClick }: { onMenuClick: () => void }) {
         <Menu className="h-5 w-5" />
       </button>
 
-      <div className="flex-1">
+      <div className="min-w-0 flex-1">
         <GlobalSearch />
       </div>
 

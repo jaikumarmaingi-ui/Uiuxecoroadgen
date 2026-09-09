@@ -201,14 +201,6 @@ type SegDraft = Omit<
   | "landmarks"
 > & { landmarks?: RoadSegment["landmarks"] };
 
-function riskLevelFromHealth(health: number): RiskLevel {
-  if (health >= 80) return "healthy";
-  if (health >= 65) return "good";
-  if (health >= 50) return "moderate";
-  if (health >= 35) return "high-risk";
-  return "critical";
-}
-
 function buildDeterioration(health: number, riskLevel: RiskLevel): RoadSegment["predictedDeterioration"] {
   const decay =
     riskLevel === "critical" ? [0, 11, 18, 24] : riskLevel === "high-risk" ? [0, 8, 14, 19] : riskLevel === "moderate" ? [0, 4, 7, 10] : riskLevel === "good" ? [0, 2, 3, 5] : [0, 1, 1, 2];
