@@ -1,22 +1,12 @@
 "use client";
 
-import { Menu, CloudSnow, MapPinned, Wifi, Radio, RefreshCw, ChevronDown } from "lucide-react";
+import Link from "next/link";
+import { Menu, CloudSnow, MapPinned, ChevronDown, BellRing } from "lucide-react";
 import { GlobalSearch } from "@/components/layout/global-search";
-import { AlertsDropdown } from "@/components/layout/alerts-dropdown";
 import { LogoMark } from "@/components/shared/logo-mark";
 import { WEATHER } from "@/lib/mock-data";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-
-function StatusPill({ label, icon: Icon }: { label: string; icon: typeof Wifi }) {
-  return (
-    <div className="hidden items-center gap-1.5 rounded-full border border-green/25 bg-green/[0.06] px-2.5 py-1 text-[10px] font-semibold tracking-wide text-green 2xl:flex">
-      <Icon className="h-3 w-3" strokeWidth={2.5} />
-      {label}
-      <span className="h-1.5 w-1.5 rounded-full bg-green animate-glow-pulse" />
-    </div>
-  );
-}
 
 function BroModeToggle() {
   const [on, setOn] = useState(true);
@@ -27,7 +17,7 @@ function BroModeToggle() {
       title="BRO Mode — Border Roads Organisation display preset"
     >
       BRO Mode
-      <span className={cn("relative h-4.5 w-8 rounded-full transition-colors", on ? "bg-green/80" : "bg-white/10")} style={{ height: 18, width: 32 }}>
+      <span className={cn("relative rounded-full transition-colors", on ? "bg-green/80" : "bg-white/10")} style={{ height: 18, width: 32 }}>
         <span
           className={cn(
             "absolute top-0.5 h-3.5 w-3.5 rounded-full bg-white shadow transition-all",
@@ -55,8 +45,8 @@ export function TopNav({ onMenuClick }: { onMenuClick: () => void }) {
             ECO<span className="text-text-primary">ROADGEN</span>
             <span className="text-green">1.0</span>
           </div>
-          <div className="max-w-[260px] truncate text-[10px] text-text-tertiary">
-            AI-Powered Predictive Road Health &amp; Sustainable Repair System
+          <div className="max-w-[300px] truncate text-[10px] text-text-tertiary">
+            AI-Powered Predictive Road Health &amp; Sustainable Repair System for Strategic Defence Roads
           </div>
         </div>
       </div>
@@ -75,15 +65,7 @@ export function TopNav({ onMenuClick }: { onMenuClick: () => void }) {
         </span>
       </div>
 
-      <div className="hidden items-center gap-1.5 xl:flex">
-        <StatusPill label="AI ENGINE ONLINE" icon={Radio} />
-        <StatusPill label="SENSOR NETWORK ONLINE" icon={Wifi} />
-        <StatusPill label="DATA SYNCED" icon={RefreshCw} />
-      </div>
-
       <BroModeToggle />
-
-      <AlertsDropdown />
 
       <div className="relative">
         <button
@@ -105,6 +87,14 @@ export function TopNav({ onMenuClick }: { onMenuClick: () => void }) {
                 <div className="text-text-tertiary">Maintenance Planner</div>
               </div>
               <div className="my-1 h-px bg-hairline" />
+              <Link
+                href="/alerts"
+                onClick={() => setProfileOpen(false)}
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-text-secondary hover:bg-white/[0.05] hover:text-text-primary"
+              >
+                <BellRing className="h-3.5 w-3.5" />
+                Alert Center
+              </Link>
               {["Switch role", "Notification preferences", "Settings", "Sign out"].map((item) => (
                 <button
                   key={item}

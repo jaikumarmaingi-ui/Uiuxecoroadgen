@@ -11,7 +11,6 @@ import { HeroRepairIntelligence } from "@/components/dashboard/hero-repair-intel
 import { RoadSegmentCard } from "@/components/shared/road-segment-card";
 import { AlertPanel } from "@/components/shared/alert-panel";
 import { DemoBadge } from "@/components/shared/demo-badge";
-import { Button } from "@/components/ui/button";
 import { ROAD_SEGMENTS, ALERTS, DASHBOARD_KPIS, SPARKLINES } from "@/lib/mock-data";
 import { Route, HeartPulse, TriangleAlert, ShieldAlert, Leaf, IndianRupee, Wrench, Target } from "lucide-react";
 
@@ -37,18 +36,10 @@ export default function DashboardPage() {
             <p className="mt-4 font-display text-base font-semibold tracking-wide text-text-secondary">
               Predict <span className="text-text-tertiary">|</span> Prioritize <span className="text-text-tertiary">|</span> Preserve
             </p>
-            <p className="mt-1.5 max-w-md text-sm text-text-tertiary">
-              For stronger borders &amp; a greener tomorrow — AI-powered predictive road health and sustainable
-              repair intelligence for strategic defence roads.
+            <p className="mt-1.5 text-sm text-text-tertiary">
+              For Stronger Borders &amp;
+              <br />a Greener Tomorrow
             </p>
-            <div className="mt-6 flex flex-wrap gap-2.5">
-              <Link href="/road-network">
-                <Button variant="primary">Open Road Network</Button>
-              </Link>
-              <Link href="/repair-recommendations">
-                <Button variant="outline">Repair Recommendations</Button>
-              </Link>
-            </div>
             <div className="mt-6">
               <DemoBadge />
             </div>
