@@ -4,8 +4,8 @@ import { Card } from "@/components/ui/card";
 import { Tooltip } from "@/components/ui/tooltip";
 import { Sparkline } from "@/components/shared/sparkline";
 import { cn } from "@/lib/utils";
-import { Info, TrendingDown, TrendingUp, Minus } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Info, TrendingDown, TrendingUp, Minus, type LucideIcon } from "lucide-react";
+import { useEffect, useState } from "react";
 
 type Tone = "green" | "cyan" | "amber" | "red" | "blue" | "neutral";
 
@@ -29,10 +29,7 @@ const toneText: Record<Tone, string> = {
 
 function useCountUp(target: number, decimals = 0) {
   const [value, setValue] = useState(0);
-  const started = useRef(false);
   useEffect(() => {
-    if (started.current) return;
-    started.current = true;
     const duration = 900;
     const start = performance.now();
     let raf: number;
@@ -60,6 +57,7 @@ export function KPIWidget({
   sparklineData,
   tooltip,
   onClick,
+  icon: Icon,
 }: {
   label: string;
   value: number;
@@ -72,6 +70,7 @@ export function KPIWidget({
   sparklineData?: number[];
   tooltip?: string;
   onClick?: () => void;
+  icon?: LucideIcon;
 }) {
   const display = useCountUp(value, decimals);
   const TrendIcon = trend === undefined ? Minus : trend > 0 ? TrendingUp : trend < 0 ? TrendingDown : Minus;
@@ -90,7 +89,17 @@ export function KPIWidget({
         style={{ background: toneColor[tone] }}
       />
       <div className="flex items-start justify-between">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-text-tertiary">{label}</span>
+        <span className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-text-tertiary">
+          {Icon && (
+            <span
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full"
+              style={{ background: `${toneColor[tone]}22`, color: toneColor[tone] }}
+            >
+              <Icon className="h-3.5 w-3.5" strokeWidth={2} />
+            </span>
+          )}
+          {label}
+        </span>
         {tooltip && (
           <Tooltip content={tooltip}>
             <Info className="h-3.5 w-3.5 text-text-tertiary hover:text-text-secondary" />
