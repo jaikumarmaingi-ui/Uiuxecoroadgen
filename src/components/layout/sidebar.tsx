@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { NAV_ITEMS } from "@/lib/nav";
 import { cn } from "@/lib/utils";
-import { ChevronsLeft, ChevronsRight, ShieldCheck, Smartphone, X } from "lucide-react";
+import { ChevronsLeft, ChevronsRight, Smartphone, X } from "lucide-react";
 
 function isActive(pathname: string, href: string) {
   if (href === "/") return pathname === "/";
@@ -21,20 +21,7 @@ export function SidebarContent({
   const pathname = usePathname();
   return (
     <div className="flex h-full flex-col">
-      <div className={cn("flex items-center gap-2.5 px-4 py-5", collapsed && "justify-center px-0")}>
-        <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-cyan/30 bg-cyan/10">
-          <ShieldCheck className="h-5 w-5 text-cyan" strokeWidth={2} />
-          <span className="absolute inset-0 rounded-lg animate-pulse-ring border border-cyan/40" />
-        </div>
-        {!collapsed && (
-          <div className="min-w-0">
-            <div className="font-display text-[13px] font-bold tracking-wide text-text-primary">ECOROADGEN</div>
-            <div className="font-mono-tech text-[10px] text-text-tertiary">v1.0 · DEFENCE INFRA</div>
-          </div>
-        )}
-      </div>
-
-      <nav className="flex-1 space-y-0.5 overflow-y-auto px-2.5 py-2">
+      <nav className="flex-1 space-y-0.5 overflow-y-auto px-2.5 py-3">
         {NAV_ITEMS.map((item) => {
           const active = isActive(pathname, item.href);
           const Icon = item.icon;
@@ -82,7 +69,7 @@ export function DesktopSidebar({ collapsed, onToggle }: { collapsed: boolean; on
   return (
     <aside
       className={cn(
-        "sticky top-0 hidden h-screen shrink-0 border-r border-hairline bg-raised/80 backdrop-blur transition-[width] duration-200 md:block",
+        "relative hidden h-full shrink-0 border-r border-hairline bg-raised/80 backdrop-blur transition-[width] duration-200 md:block",
         collapsed ? "w-[68px]" : "w-64",
       )}
     >

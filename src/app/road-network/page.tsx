@@ -42,7 +42,7 @@ export default function RoadNetworkPage() {
   }, [filters]);
 
   return (
-    <div className="flex h-[calc(100vh-61px)] flex-col">
+    <div className="flex h-full flex-col">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-hairline px-4 py-3 md:px-6">
         <div>
           <div className="flex items-center gap-2.5">
