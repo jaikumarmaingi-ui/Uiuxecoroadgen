@@ -12,7 +12,7 @@ export function RoadSenseTopNav() {
 
   return (
     <header className="z-30 flex shrink-0 items-center gap-4 border-b border-white/10 bg-[#07090b]/90 px-4 py-2.5 backdrop-blur md:px-6">
-      <Link href="/" className="hidden shrink-0 items-center gap-1.5 text-text-tertiary hover:text-cyan sm:flex" title="Back to EcoRoadGen">
+      <Link href="/dashboard" className="hidden shrink-0 items-center gap-1.5 text-text-tertiary hover:text-cyan sm:flex" title="Open EcoRoadGen Dashboard">
         <ArrowLeft className="h-3.5 w-3.5" />
       </Link>
 

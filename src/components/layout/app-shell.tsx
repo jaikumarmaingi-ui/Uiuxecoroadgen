@@ -10,7 +10,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
   const isFieldMode = pathname.startsWith("/field-inspection");
-  const isBareMode = isFieldMode || pathname.startsWith("/road-sense");
+  const isHero = pathname === "/";
+  const isBareMode = isFieldMode || isHero;
 
   if (isBareMode) {
     return <div className="min-h-screen bg-grid">{children}</div>;

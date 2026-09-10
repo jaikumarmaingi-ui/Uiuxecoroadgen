@@ -1,197 +1,177 @@
 "use client";
 
-import Link from "next/link";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { KPIWidget } from "@/components/shared/kpi-widget";
-import { AIIntelligenceStar } from "@/components/dashboard/ai-intelligence-star";
-import { MountainHeroBackground } from "@/components/dashboard/mountain-hero-background";
-import { MiniStrategicMap } from "@/components/dashboard/mini-strategic-map";
-import { LiveFeedRow } from "@/components/dashboard/live-feed-row";
-import { HeroRepairIntelligence } from "@/components/dashboard/hero-repair-intelligence";
-import { RoadSegmentCard } from "@/components/shared/road-segment-card";
-import { AlertPanel } from "@/components/shared/alert-panel";
-import { DemoBadge } from "@/components/shared/demo-badge";
-import { ROAD_SEGMENTS, ALERTS, DASHBOARD_KPIS, SPARKLINES } from "@/lib/mock-data";
-import { Route, HeartPulse, TriangleAlert, ShieldAlert, Leaf, IndianRupee, Wrench, Target } from "lucide-react";
+import dynamic from "next/dynamic";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { PanelsTopLeft, X } from "lucide-react";
+import { RoadSenseTopNav } from "@/components/road-sense/ui/top-nav";
+import { TerrainSelector } from "@/components/road-sense/ui/terrain-selector";
+import { Toolbar } from "@/components/road-sense/ui/toolbar";
+import { RightPanels } from "@/components/road-sense/ui/right-panels";
+import { LayersPanel } from "@/components/road-sense/ui/layers-panel";
+import { MiniMap } from "@/components/road-sense/ui/mini-map";
+import { ViewControls } from "@/components/road-sense/ui/view-controls";
+import { DefectPanel } from "@/components/road-sense/ui/defect-panel";
+import { SegmentPanel } from "@/components/road-sense/ui/segment-panel";
+import { DroneHud } from "@/components/road-sense/ui/drone-hud";
+import type { CameraCommands, ViewProjection, ViewStyle } from "@/components/road-sense/terrain-canvas";
+import { TERRAIN_CONFIGS, generateRoadPath } from "@/lib/road-sense/terrain-config";
+import { generateDefects } from "@/lib/road-sense/defects-data";
+import { DEFAULT_LAYERS, type LayerKey } from "@/lib/road-sense/layers";
+import type { RoadDefect, TerrainType } from "@/lib/road-sense/types";
 
-export default function DashboardPage() {
-  const topPriority = [...ROAD_SEGMENTS].sort((a, b) => b.priorityScore - a.priorityScore).slice(0, 5);
+const TerrainCanvas = dynamic(() => import("@/components/road-sense/terrain-canvas").then((m) => m.TerrainCanvas), {
+  ssr: false,
+});
+
+export default function RoadSensePage() {
+  const [terrainType, setTerrainType] = useState<TerrainType>("mountain");
+  const [aiOverlay, setAiOverlay] = useState(false);
+  const [droneActive, setDroneActive] = useState(false);
+  const [layers, setLayers] = useState(DEFAULT_LAYERS);
+  const [viewProjection, setViewProjection] = useState<ViewProjection>("3d");
+  const [viewStyle, setViewStyle] = useState<ViewStyle>("terrain");
+  const [dragMode, setDragMode] = useState<"rotate" | "pan">("rotate");
+  const [selectedDefect, setSelectedDefect] = useState<RoadDefect | null>(null);
+  const [segmentOpen, setSegmentOpen] = useState(false);
+  const [mobileSheet, setMobileSheet] = useState(false);
+  const [droneT, setDroneT] = useState(0.15);
+
+  const cameraApiRef = useRef<CameraCommands | null>(null);
+  const droneProgressRef = useRef(0.15);
+
+  const config = TERRAIN_CONFIGS[terrainType];
+  const path = useMemo(() => generateRoadPath(config), [config]);
+  const defects = useMemo(() => generateDefects(config.id, config.seed), [config]);
+
+  useEffect(() => {
+    const id = setInterval(() => setDroneT(droneProgressRef.current), 250);
+    return () => clearInterval(id);
+  }, []);
+
+  function selectTerrain(t: TerrainType) {
+    setTerrainType(t);
+    setSelectedDefect(null);
+    setSegmentOpen(false);
+    droneProgressRef.current = 0.15;
+    cameraApiRef.current?.reset();
+  }
+
+  function toggleLayer(key: LayerKey) {
+    setLayers((prev) => ({ ...prev, [key]: !prev[key] }));
+  }
+
+  function navigateMap(x: number, z: number) {
+    cameraApiRef.current?.panTo(x, z);
+  }
 
   return (
-    <div className="mx-auto max-w-[1500px] space-y-6 p-4 md:p-6">
-      {/* Hero */}
-      <Card className="relative overflow-hidden border-hairline-strong p-0">
-        <MountainHeroBackground />
-        <div className="relative grid gap-6 p-6 md:p-10 lg:grid-cols-[1fr_auto_auto] lg:items-center">
-          <div>
-            <div className="mb-3 flex items-center gap-2 font-mono-tech text-[11px] uppercase tracking-widest text-text-tertiary">
-              <span className="h-1.5 w-1.5 rounded-full bg-cyan animate-glow-pulse" />
-              ECOROADGEN 1.0 · COMMAND DASHBOARD
+    <div className="fixed inset-0 flex flex-col bg-[#05080a] text-text-primary">
+      <RoadSenseTopNav />
+
+      <div className="relative flex-1 overflow-hidden">
+        <div className="absolute inset-0">
+          <TerrainCanvas
+            terrainType={terrainType}
+            aiOverlay={aiOverlay}
+            droneActive={droneActive}
+            layers={layers}
+            viewProjection={viewProjection}
+            viewStyle={viewStyle}
+            cameraApiRef={cameraApiRef}
+            selectedDefectId={selectedDefect?.id ?? null}
+            onSelectDefect={(d) => {
+              setSelectedDefect(d);
+              setSegmentOpen(false);
+            }}
+            onRoadClick={() => {
+              setSegmentOpen(true);
+              setSelectedDefect(null);
+            }}
+            droneProgressRef={droneProgressRef}
+            dragMode={dragMode}
+          />
+        </div>
+
+        {/* desktop overlay chrome */}
+        <div className="pointer-events-none absolute inset-0 hidden flex-col gap-4 p-4 lg:flex">
+          <div className="flex flex-1 items-start justify-between gap-4">
+            <div className="pointer-events-none flex w-44 shrink-0 flex-col gap-3">
+              <TerrainSelector active={terrainType} onSelect={selectTerrain} />
+              <LayersPanel layers={layers} onToggle={toggleLayer} />
             </div>
-            <h1 className="font-display text-4xl font-bold leading-[1.05] tracking-tight text-white sm:text-5xl">
-              INTELLIGENCE
-              <br />
-              <span className="text-green">ON EVERY MILE</span>
-            </h1>
-            <p className="mt-4 font-display text-base font-semibold tracking-wide text-text-secondary">
-              Predict <span className="text-text-tertiary">|</span> Prioritize <span className="text-text-tertiary">|</span> Preserve
-            </p>
-            <p className="mt-1.5 text-sm text-text-tertiary">
-              For Stronger Borders &amp;
-              <br />a Greener Tomorrow
-            </p>
-            <div className="mt-6">
-              <DemoBadge />
+
+            <div className="pointer-events-none flex flex-col items-center gap-3">
+              <Toolbar config={config} aiOverlay={aiOverlay} setAiOverlay={setAiOverlay} droneActive={droneActive} setDroneActive={setDroneActive} />
+              {droneActive && <DroneHud onClose={() => setDroneActive(false)} />}
             </div>
+
+            <RightPanels config={config} />
           </div>
 
-          <div className="flex flex-col items-center">
-            <AIIntelligenceStar />
-            <p className="mt-1 max-w-[280px] px-2 text-center text-[11px] text-text-tertiary">
-              Click a facet to open that module of the intelligence cycle.
-            </p>
-          </div>
-
-          <div className="hidden lg:block">
-            <MiniStrategicMap />
+          <div className="flex items-end justify-between gap-4">
+            <MiniMap path={path} defects={defects} droneT={droneT} onNavigate={navigateMap} />
+            <ViewControls
+              cameraApiRef={cameraApiRef}
+              dragMode={dragMode}
+              setDragMode={setDragMode}
+              projection={viewProjection}
+              setProjection={setViewProjection}
+              style={viewStyle}
+              setStyle={setViewStyle}
+            />
           </div>
         </div>
 
-        <div className="relative flex items-center justify-between border-t border-white/5 px-6 py-3 text-[10px] font-semibold uppercase tracking-[0.2em] text-text-tertiary md:px-10">
-          <span>Strong Roads · Safer Borders · Greener Tomorrow</span>
-          <span className="hidden sm:inline">Infrastructure for a Stronger Tomorrow</span>
+        {/* mobile overlay chrome */}
+        <div className="pointer-events-none absolute inset-0 flex flex-col gap-2.5 p-3 lg:hidden">
+          <TerrainSelector active={terrainType} onSelect={selectTerrain} className="overflow-x-auto" />
+          <Toolbar config={config} aiOverlay={aiOverlay} setAiOverlay={setAiOverlay} droneActive={droneActive} setDroneActive={setDroneActive} />
+          {droneActive && <DroneHud onClose={() => setDroneActive(false)} />}
+          <div className="flex-1" />
+          <div className="flex items-end justify-between gap-2.5">
+            <button
+              onClick={() => setMobileSheet(true)}
+              className="glass-panel pointer-events-auto flex items-center gap-2 rounded-xl border border-white/10 px-3.5 py-2.5 text-xs font-bold uppercase tracking-wide text-text-secondary"
+            >
+              <PanelsTopLeft className="h-4 w-4 text-cyan" />
+              Health {config.health}/100
+            </button>
+            <ViewControls
+              cameraApiRef={cameraApiRef}
+              dragMode={dragMode}
+              setDragMode={setDragMode}
+              projection={viewProjection}
+              setProjection={setViewProjection}
+              style={viewStyle}
+              setStyle={setViewStyle}
+            />
+          </div>
         </div>
-      </Card>
 
-      {/* KPIs */}
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
-        <KPIWidget
-          icon={Route}
-          label="Total Road Length"
-          value={DASHBOARD_KPIS.totalRoadLengthKm}
-          suffix=" km"
-          tone="cyan"
-          sparklineData={SPARKLINES.length}
-          tooltip="Total length of monitored strategic road network under EcoRoadGen."
-        />
-        <KPIWidget
-          icon={HeartPulse}
-          label="Overall Road Health"
-          value={DASHBOARD_KPIS.overallHealth}
-          suffix=" / 100"
-          tone="green"
-          trend={2.6}
-          trendLabel="vs last month"
-          sparklineData={SPARKLINES.health}
-          tooltip="Network-wide average health score across all monitored segments."
-        />
-        <KPIWidget
-          icon={TriangleAlert}
-          label="High Risk Segments"
-          value={DASHBOARD_KPIS.highRiskSegments}
-          tone="amber"
-          trend={-4.2}
-          trendLabel="vs last month"
-          sparklineData={SPARKLINES.risk}
-          tooltip="Segments with risk score above 65, requiring near-term attention."
-        />
-        <KPIWidget
-          icon={ShieldAlert}
-          label="Critical Segments"
-          value={DASHBOARD_KPIS.criticalSegments}
-          tone="red"
-          trend={9.1}
-          trendLabel="vs last month"
-          sparklineData={SPARKLINES.critical}
-          tooltip="Segments predicted to fail within 30 days without intervention."
-        />
-        <KPIWidget
-          icon={Leaf}
-          label="CO₂ Reduction Potential"
-          value={DASHBOARD_KPIS.co2ReductionPotentialTons}
-          suffix=" t"
-          tone="green"
-          trend={5.4}
-          trendLabel="vs last quarter"
-          sparklineData={SPARKLINES.co2}
-          tooltip="Estimated CO₂ emissions avoided by adopting AI-recommended repairs over conventional methods."
-        />
-        <KPIWidget
-          icon={IndianRupee}
-          label="Estimated Cost Savings"
-          value={DASHBOARD_KPIS.estimatedCostSavingsCr}
-          prefix="₹"
-          suffix=" Cr"
-          decimals={1}
-          tone="cyan"
-          trend={3.1}
-          trendLabel="vs last quarter"
-          sparklineData={SPARKLINES.savings}
-          tooltip="Cumulative cost savings from AI-optimized repair method selection."
-        />
-        <KPIWidget
-          icon={Wrench}
-          label="Repair Backlog"
-          value={DASHBOARD_KPIS.repairBacklogKm}
-          suffix=" km"
-          tone="amber"
-          trend={-2.3}
-          trendLabel="vs last month"
-          sparklineData={SPARKLINES.backlog}
-          tooltip="Total length of road segments awaiting repair execution."
-        />
-        <KPIWidget
-          icon={Target}
-          label="Prediction Accuracy"
-          value={DASHBOARD_KPIS.predictionAccuracyPct}
-          suffix="%"
-          decimals={1}
-          tone="blue"
-          trend={0.4}
-          trendLabel="model rolling avg"
-          sparklineData={SPARKLINES.accuracy}
-          tooltip="Rolling accuracy of the deterioration prediction model against verified outcomes."
-        />
-      </section>
+        {mobileSheet && (
+          <div className="pointer-events-auto absolute inset-0 z-40 flex flex-col justify-end bg-black/60 lg:hidden" onClick={() => setMobileSheet(false)}>
+            <div
+              className="max-h-[80vh] overflow-y-auto rounded-t-2xl border-t border-white/10 bg-[#0a0d10] p-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="mb-3 flex items-center justify-between">
+                <span className="font-mono-tech text-xs font-bold uppercase tracking-widest text-text-tertiary">Terrain &amp; Road Intelligence</span>
+                <button onClick={() => setMobileSheet(false)} className="text-text-tertiary">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="space-y-3">
+                <RightPanels config={config} />
+                <LayersPanel layers={layers} onToggle={toggleLayer} />
+                <MiniMap path={path} defects={defects} droneT={droneT} onNavigate={navigateMap} />
+              </div>
+            </div>
+          </div>
+        )}
 
-      {/* Live feed row */}
-      <section>
-        <LiveFeedRow />
-      </section>
-
-      {/* Hero repair intelligence */}
-      <section>
-        <HeroRepairIntelligence />
-      </section>
-
-      {/* Priority + alerts */}
-      <section className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
-        <Card>
-          <CardHeader>
-            <CardTitle>Top Priority Segments</CardTitle>
-            <Link href="/repair-recommendations" className="text-[11px] font-semibold text-cyan hover:underline">
-              View prioritization engine →
-            </Link>
-          </CardHeader>
-          <CardContent className="space-y-2.5">
-            {topPriority.map((s, i) => (
-              <RoadSegmentCard key={s.id} segment={s} href={`/road-network/${s.id}`} rank={i + 1} />
-            ))}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Live Alerts</CardTitle>
-            <Link href="/alerts" className="text-[11px] font-semibold text-cyan hover:underline">
-              View all →
-            </Link>
-          </CardHeader>
-          <CardContent>
-            <AlertPanel alerts={ALERTS.slice(0, 5)} compact />
-          </CardContent>
-        </Card>
-      </section>
+        {selectedDefect && <DefectPanel defect={selectedDefect} onClose={() => setSelectedDefect(null)} />}
+        {segmentOpen && !selectedDefect && <SegmentPanel config={config} onClose={() => setSegmentOpen(false)} />}
+      </div>
     </div>
   );
 }
