@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { NAV_ITEMS } from "@/lib/nav";
 import { cn } from "@/lib/utils";
-import { ChevronsLeft, ChevronsRight, Smartphone, X } from "lucide-react";
+import { ChevronsLeft, ChevronsRight, Smartphone, Box, X } from "lucide-react";
 
 function isActive(pathname: string, href: string) {
   if (href === "/") return pathname === "/";
@@ -59,6 +59,18 @@ export function SidebarContent({
         >
           <Smartphone className="h-4 w-4 shrink-0" strokeWidth={1.8} />
           {!collapsed && <span>Field Inspection Mode</span>}
+        </Link>
+        <Link
+          href="/field-inspection-3d"
+          onClick={onNavigate}
+          className={cn(
+            "flex items-center gap-2.5 rounded-lg border border-hairline-strong bg-white/[0.03] px-2.5 py-2.5 text-xs font-semibold text-text-secondary hover:border-cyan/30 hover:text-cyan",
+            collapsed && "justify-center px-0",
+          )}
+          title={collapsed ? "3D Field Inspection" : undefined}
+        >
+          <Box className="h-4 w-4 shrink-0" strokeWidth={1.8} />
+          {!collapsed && <span>3D Field Inspection</span>}
         </Link>
       </div>
     </div>
