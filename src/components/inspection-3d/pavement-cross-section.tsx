@@ -25,6 +25,8 @@ export function PavementCrossSection({
   const layerRefs = useRef<(THREE.Mesh | null)[]>([]);
   const growth = useRef(0);
   const groupScaleRef = useRef<THREE.Group>(null);
+  const platformRef = useRef<THREE.Mesh>(null);
+  const ringRef = useRef<THREE.Mesh>(null);
 
   const layers = useMemo(
     () =>
@@ -51,16 +53,26 @@ export function PavementCrossSection({
       const targetY = exploded ? explodedY : collapsedY;
       mesh.position.y = THREE.MathUtils.damp(mesh.position.y, targetY, 4.5, delta);
     });
+
+    // Keep the pit floor tracking just beneath the deepest visible layer,
+    // whether the stack is collapsed or exploded, instead of leaving a large
+    // empty shaft when collapsed.
+    const deepest = layerRefs.current[layers.length - 1];
+    if (deepest && platformRef.current && ringRef.current) {
+      const floorY = deepest.position.y - LAYER_THICKNESS / 2 - 0.2;
+      platformRef.current.position.y = THREE.MathUtils.damp(platformRef.current.position.y, floorY - 0.07, 4.5, delta);
+      ringRef.current.position.y = THREE.MathUtils.damp(ringRef.current.position.y, floorY, 4.5, delta);
+    }
   });
 
   return (
     <group position={position}>
-      {/* inspection pit frame */}
-      <mesh position={[0, -1.7, 0]} receiveShadow>
+      {/* inspection pit frame — tracks just beneath the deepest visible layer */}
+      <mesh ref={platformRef} position={[0, -0.5, 0]} receiveShadow>
         <cylinderGeometry args={[LAYER_FOOTPRINT * 0.85, LAYER_FOOTPRINT * 0.95, 0.15, 24]} />
         <meshStandardMaterial color="#11151b" roughness={0.9} />
       </mesh>
-      <mesh position={[0, -1.63, 0]}>
+      <mesh ref={ringRef} position={[0, -0.43, 0]}>
         <cylinderGeometry args={[LAYER_FOOTPRINT * 0.86, LAYER_FOOTPRINT * 0.86, 0.02, 24]} />
         <meshStandardMaterial color="#35e0d0" emissive="#35e0d0" emissiveIntensity={0.35} transparent opacity={0.18} />
       </mesh>
@@ -97,7 +109,7 @@ export function PavementCrossSection({
                 emissiveIntensity={selectedLayer === i ? 0.25 : 0}
               />
               {exploded && (
-                <Html position={[LAYER_FOOTPRINT / 2 + 0.15, 0, 0]} center={false} distanceFactor={9} occlude={false}>
+                <Html position={[-(LAYER_FOOTPRINT / 2) - 0.15, 0, 0]} center={false} distanceFactor={9} occlude={false}>
                   <div className="pointer-events-none whitespace-nowrap rounded-md border border-hairline-strong bg-panel/90 px-2 py-1 text-[10px] font-semibold text-text-primary shadow-lg">
                     {layer.label}
                     <span className="ml-1.5 font-mono-tech text-cyan">{layer.inspection.integrityPct}%</span>
