@@ -21,7 +21,7 @@ export interface NavItem {
 }
 
 export const NAV_ITEMS: NavItem[] = [
-  { label: "Dashboard", href: "/", icon: LayoutDashboard, description: "Network command center" },
+  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, description: "Network command center" },
   { label: "Road Network", href: "/road-network", icon: Map, description: "GIS road intelligence" },
   { label: "AI Insights", href: "/ai-insights", icon: BrainCircuit, description: "Model performance & explainability" },
   { label: "Condition Monitoring", href: "/condition-monitoring", icon: ActivitySquare, description: "Distress & sensor telemetry" },
