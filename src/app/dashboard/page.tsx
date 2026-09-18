@@ -4,24 +4,32 @@ import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { KPIWidget } from "@/components/shared/kpi-widget";
 import { AIIntelligenceStar } from "@/components/dashboard/ai-intelligence-star";
-import { MountainHeroBackground } from "@/components/dashboard/mountain-hero-background";
 import { MiniStrategicMap } from "@/components/dashboard/mini-strategic-map";
 import { LiveFeedRow } from "@/components/dashboard/live-feed-row";
 import { HeroRepairIntelligence } from "@/components/dashboard/hero-repair-intelligence";
 import { RoadSegmentCard } from "@/components/shared/road-segment-card";
 import { AlertPanel } from "@/components/shared/alert-panel";
 import { DemoBadge } from "@/components/shared/demo-badge";
-import { ROAD_SEGMENTS, ALERTS, DASHBOARD_KPIS, SPARKLINES } from "@/lib/mock-data";
+import { EcoRoadGenMotion } from "@/components/eco-motion/EcoRoadGenMotion";
+import { roadHealthDataFromSegment } from "@/lib/eco-motion/from-road-segment";
+import { ROAD_SEGMENTS, ALERTS, DASHBOARD_KPIS, SPARKLINES, getSegment } from "@/lib/mock-data";
 import { Route, HeartPulse, TriangleAlert, ShieldAlert, Leaf, IndianRupee, Wrench, Target } from "lucide-react";
 
 export default function DashboardPage() {
   const topPriority = [...ROAD_SEGMENTS].sort((a, b) => b.priorityScore - a.priorityScore).slice(0, 5);
+  // Same flagship segment HeroRepairIntelligence below highlights, so the
+  // motion graphic and the rest of the dashboard tell one consistent story.
+  const heroSegment = getSegment("nh3-srn-leh-210")!;
+  const heroRoadHealthData = roadHealthDataFromSegment(heroSegment);
 
   return (
     <div className="mx-auto max-w-[1500px] space-y-6 p-4 md:p-6">
       {/* Hero */}
       <Card className="relative overflow-hidden border-hairline-strong p-0">
-        <MountainHeroBackground />
+        <div className="p-3 pb-0 md:p-4 md:pb-0">
+          <EcoRoadGenMotion data={heroRoadHealthData} />
+        </div>
+
         <div className="relative grid gap-6 p-6 md:p-10 lg:grid-cols-[1fr_auto_auto] lg:items-center">
           <div>
             <div className="mb-3 flex items-center gap-2 font-mono-tech text-[11px] uppercase tracking-widest text-text-tertiary">
