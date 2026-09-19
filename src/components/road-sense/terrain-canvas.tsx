@@ -14,8 +14,9 @@ import { DefectMarkers } from "./scene/defect-markers";
 import { Drone } from "./scene/drone";
 import { ElevationWireframe, RiskZoneHalos, CoverageStrip, TrafficDots, DrainageFlow, BridgeDecks } from "./scene/extra-layers";
 import { WeatherEffects } from "./scene/weather-effects";
-import { TERRAIN_CONFIGS, TERRAIN_SIZE, generateRoadPath } from "@/lib/road-sense/terrain-config";
+import { TERRAIN_CONFIGS, TERRAIN_SIZE, generateRoadPath, type RoadPoint } from "@/lib/road-sense/terrain-config";
 import { generateDefects } from "@/lib/road-sense/defects-data";
+import { pointOnRoad } from "@/lib/road-sense/build-road-geometry";
 import { WEATHER_ENVIRONMENT } from "@/lib/road-sense/weather";
 import { usePrefersReducedMotion } from "@/lib/road-sense/use-reduced-motion";
 import type { TerrainType, RoadDefect, WeatherCondition } from "@/lib/road-sense/types";
@@ -45,11 +46,17 @@ function CameraRig({
   cameraApiRef,
   dragMode,
   heightScale,
+  path,
+  driveActive,
+  driveProgressRef,
 }: {
   projection: ViewProjection;
   cameraApiRef: React.MutableRefObject<CameraCommands | null>;
   dragMode: "rotate" | "pan";
   heightScale: number;
+  path: RoadPoint[];
+  driveActive: boolean;
+  driveProgressRef: React.MutableRefObject<number>;
 }) {
   const { camera } = useThree();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -57,12 +64,17 @@ function CameraRig({
   const desiredRef = useRef(BASE_CAM.clone());
   const desiredTargetRef = useRef(new THREE.Vector3(0, 0, 0));
   const transitioningRef = useRef(true);
+  const lookAtTarget = useRef(new THREE.Vector3());
 
   useEffect(() => {
     desiredRef.current = projection === "2d" ? TOPDOWN_CAM.clone() : droneCamFor(heightScale);
     desiredTargetRef.current.set(0, 0, 0);
     transitioningRef.current = true;
   }, [projection, heightScale]);
+
+  useEffect(() => {
+    if (!driveActive) transitioningRef.current = true;
+  }, [driveActive]);
 
   useEffect(() => {
     cameraApiRef.current = {
@@ -95,7 +107,17 @@ function CameraRig({
     };
   }, [cameraApiRef, projection, heightScale]);
 
-  useFrame(() => {
+  useFrame((_, delta) => {
+    if (driveActive && path.length > 1) {
+      driveProgressRef.current = (driveProgressRef.current + delta * 0.014) % 1;
+      const p = pointOnRoad(path, driveProgressRef.current);
+      const ahead = pointOnRoad(path, (driveProgressRef.current + 0.008) % 1);
+      const eyeHeight = 1.75;
+      camera.position.set(p.x, p.y + eyeHeight, p.z);
+      lookAtTarget.current.set(ahead.x, ahead.y + eyeHeight * 0.55, ahead.z);
+      camera.lookAt(lookAtTarget.current);
+      return;
+    }
     if (transitioningRef.current) {
       camera.position.lerp(desiredRef.current, 0.045);
       if (controlsRef.current) {
@@ -109,6 +131,7 @@ function CameraRig({
   return (
     <OrbitControls
       ref={controlsRef}
+      enabled={!driveActive}
       enableDamping
       dampingFactor={0.08}
       minDistance={12}
@@ -127,6 +150,7 @@ function CameraRig({
 
 function Scene({
   terrainType,
+  path,
   aiOverlay,
   xray,
   weather,
@@ -139,6 +163,7 @@ function Scene({
   droneProgressRef,
 }: {
   terrainType: TerrainType;
+  path: RoadPoint[];
   aiOverlay: boolean;
   xray: boolean;
   weather: WeatherCondition;
@@ -151,7 +176,6 @@ function Scene({
   droneProgressRef: React.MutableRefObject<number>;
 }) {
   const config = TERRAIN_CONFIGS[terrainType];
-  const path = useMemo(() => generateRoadPath(config), [config]);
   const defects = useMemo(() => generateDefects(config.id, config.seed), [config]);
   const reducedMotion = usePrefersReducedMotion();
   const weatherEnv = WEATHER_ENVIRONMENT[weather];
@@ -205,6 +229,7 @@ export function TerrainCanvas({
   xray = false,
   weather = "normal",
   droneActive,
+  driveActive = false,
   layers,
   viewProjection,
   viewStyle,
@@ -213,6 +238,7 @@ export function TerrainCanvas({
   onSelectDefect,
   onRoadClick,
   droneProgressRef,
+  driveProgressRef,
   dragMode,
 }: {
   terrainType: TerrainType;
@@ -220,6 +246,7 @@ export function TerrainCanvas({
   xray?: boolean;
   weather?: WeatherCondition;
   droneActive: boolean;
+  driveActive?: boolean;
   layers: Record<LayerKey, boolean>;
   viewProjection: ViewProjection;
   viewStyle: ViewStyle;
@@ -228,15 +255,30 @@ export function TerrainCanvas({
   onSelectDefect: (d: RoadDefect) => void;
   onRoadClick: () => void;
   droneProgressRef: React.MutableRefObject<number>;
+  driveProgressRef?: React.MutableRefObject<number>;
   dragMode: "rotate" | "pan";
 }) {
-  const heightScale = TERRAIN_CONFIGS[terrainType].heightScale;
+  const config = TERRAIN_CONFIGS[terrainType];
+  const heightScale = config.heightScale;
+  const path = useMemo(() => generateRoadPath(config), [config]);
+  const fallbackDriveProgress = useRef(0.1);
+  const resolvedDriveProgressRef = driveProgressRef ?? fallbackDriveProgress;
+
   return (
     <Canvas shadows dpr={[1, 1.6]} gl={{ antialias: true }}>
       <PerspectiveCamera makeDefault position={BASE_CAM.toArray()} fov={48} near={0.5} far={500} />
-      <CameraRig projection={viewProjection} cameraApiRef={cameraApiRef} dragMode={dragMode} heightScale={heightScale} />
+      <CameraRig
+        projection={viewProjection}
+        cameraApiRef={cameraApiRef}
+        dragMode={dragMode}
+        heightScale={heightScale}
+        path={path}
+        driveActive={driveActive}
+        driveProgressRef={resolvedDriveProgressRef}
+      />
       <Scene
         terrainType={terrainType}
+        path={path}
         aiOverlay={aiOverlay}
         xray={xray}
         weather={weather}

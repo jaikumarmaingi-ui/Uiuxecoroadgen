@@ -1,6 +1,6 @@
 "use client";
 
-import { Plane, ScanEye, FlaskConical } from "lucide-react";
+import { Plane, Car, ScanEye, FlaskConical } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { TerrainConfig } from "@/lib/road-sense/types";
 
@@ -10,12 +10,16 @@ export function Toolbar({
   setAiOverlay,
   droneActive,
   setDroneActive,
+  driveActive,
+  setDriveActive,
 }: {
   config: TerrainConfig;
   aiOverlay: boolean;
   setAiOverlay: (v: boolean) => void;
   droneActive: boolean;
   setDroneActive: (v: boolean) => void;
+  driveActive: boolean;
+  setDriveActive: (v: boolean) => void;
 }) {
   return (
     <div className="pointer-events-auto flex flex-wrap items-center gap-2.5">
@@ -39,6 +43,17 @@ export function Toolbar({
           <ScanEye className="h-3 w-3" /> AI Analysis
         </button>
       </div>
+
+      <button
+        onClick={() => setDriveActive(!driveActive)}
+        className={cn(
+          "glass-panel flex items-center gap-2 rounded-xl border px-3.5 py-2 text-[10px] font-bold uppercase tracking-wide transition-colors",
+          driveActive ? "border-cyan/50 bg-cyan/15 text-cyan" : "border-white/10 text-text-secondary hover:border-white/20",
+        )}
+      >
+        <Car className="h-3.5 w-3.5" />
+        {driveActive ? "Drive Mode Active" : "Start Drive Mode"}
+      </button>
 
       <button
         onClick={() => setDroneActive(!droneActive)}

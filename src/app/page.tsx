@@ -15,6 +15,7 @@ import { SegmentPanel } from "@/components/road-sense/ui/segment-panel";
 import { InspectionPanel } from "@/components/road-sense/ui/inspection-panel";
 import { WeatherSelector } from "@/components/road-sense/ui/weather-selector";
 import { DroneHud } from "@/components/road-sense/ui/drone-hud";
+import { DriveHud } from "@/components/road-sense/ui/drive-hud";
 import type { CameraCommands, ViewProjection, ViewStyle } from "@/components/road-sense/terrain-canvas";
 import { TERRAIN_CONFIGS, generateRoadPath } from "@/lib/road-sense/terrain-config";
 import { generateDefects } from "@/lib/road-sense/defects-data";
@@ -30,6 +31,7 @@ export default function RoadSensePage() {
   const [terrainType, setTerrainType] = useState<TerrainType>("mountain");
   const [aiOverlay, setAiOverlay] = useState(false);
   const [droneActive, setDroneActive] = useState(false);
+  const [driveActive, setDriveActive] = useState(false);
   const [layers, setLayers] = useState(DEFAULT_LAYERS);
   const [viewProjection, setViewProjection] = useState<ViewProjection>("3d");
   const [viewStyle, setViewStyle] = useState<ViewStyle>("terrain");
@@ -40,9 +42,11 @@ export default function RoadSensePage() {
   const [weather, setWeather] = useState<WeatherCondition>("normal");
   const [mobileSheet, setMobileSheet] = useState(false);
   const [droneT, setDroneT] = useState(0.15);
+  const [driveT, setDriveT] = useState(0.1);
 
   const cameraApiRef = useRef<CameraCommands | null>(null);
   const droneProgressRef = useRef(0.15);
+  const driveProgressRef = useRef(0.1);
   const reducedMotion = usePrefersReducedMotion();
 
   const config = TERRAIN_CONFIGS[terrainType];
@@ -51,9 +55,25 @@ export default function RoadSensePage() {
   const xray = inspectionMode === "xray";
 
   useEffect(() => {
-    const id = setInterval(() => setDroneT(droneProgressRef.current), 250);
+    const id = setInterval(() => {
+      setDroneT(droneProgressRef.current);
+      setDriveT(driveProgressRef.current);
+    }, 250);
     return () => clearInterval(id);
   }, []);
+
+  function toggleDrive(active: boolean) {
+    setDriveActive(active);
+    if (active) {
+      setDroneActive(false);
+      closePanels();
+    }
+  }
+
+  function toggleDrone(active: boolean) {
+    setDroneActive(active);
+    if (active) setDriveActive(false);
+  }
 
   function closePanels() {
     setSelectedDefect(null);
@@ -82,6 +102,8 @@ export default function RoadSensePage() {
     setTerrainType(t);
     closePanels();
     droneProgressRef.current = 0.15;
+    driveProgressRef.current = 0.1;
+    setDriveActive(false);
     cameraApiRef.current?.reset();
   }
 
@@ -105,6 +127,8 @@ export default function RoadSensePage() {
             xray={xray}
             weather={weather}
             droneActive={droneActive}
+            driveActive={driveActive}
+            driveProgressRef={driveProgressRef}
             layers={layers}
             viewProjection={viewProjection}
             viewStyle={viewStyle}
@@ -135,8 +159,17 @@ export default function RoadSensePage() {
             </div>
 
             <div className="pointer-events-none flex flex-col items-center gap-3">
-              <Toolbar config={config} aiOverlay={aiOverlay} setAiOverlay={setAiOverlay} droneActive={droneActive} setDroneActive={setDroneActive} />
+              <Toolbar
+                config={config}
+                aiOverlay={aiOverlay}
+                setAiOverlay={setAiOverlay}
+                droneActive={droneActive}
+                setDroneActive={toggleDrone}
+                driveActive={driveActive}
+                setDriveActive={toggleDrive}
+              />
               {droneActive && <DroneHud onClose={() => setDroneActive(false)} />}
+              {driveActive && <DriveHud config={config} weather={weather} driveT={driveT} onClose={() => setDriveActive(false)} />}
             </div>
 
             <RightPanels config={config} />
@@ -159,8 +192,17 @@ export default function RoadSensePage() {
         {/* mobile overlay chrome */}
         <div className="pointer-events-none absolute inset-0 flex flex-col gap-2.5 p-3 lg:hidden">
           <TerrainSelector active={terrainType} onSelect={selectTerrain} className="overflow-x-auto" />
-          <Toolbar config={config} aiOverlay={aiOverlay} setAiOverlay={setAiOverlay} droneActive={droneActive} setDroneActive={setDroneActive} />
+          <Toolbar
+            config={config}
+            aiOverlay={aiOverlay}
+            setAiOverlay={setAiOverlay}
+            droneActive={droneActive}
+            setDroneActive={toggleDrone}
+            driveActive={driveActive}
+            setDriveActive={toggleDrive}
+          />
           {droneActive && <DroneHud onClose={() => setDroneActive(false)} />}
+          {driveActive && <DriveHud config={config} weather={weather} driveT={driveT} onClose={() => setDriveActive(false)} />}
           <div className="flex-1" />
           <div className="flex items-end justify-between gap-2.5">
             <button
