@@ -204,7 +204,7 @@ function Scene({
       <directionalLight position={[-50, 35, -60]} intensity={0.28} color="#9fb8d0" />
       <ambientLight intensity={0.12} />
 
-      <TerrainMesh config={config} />
+      <TerrainMesh config={config} path={path} />
       {layers.water && <WaterPlane config={config} weather={weather} />}
       {layers.roads && (
         <RoadRibbon path={path} width={config.roadWidth} defects={defects} aiOverlay={aiOverlay} xray={xray} onClick={onRoadClick} />

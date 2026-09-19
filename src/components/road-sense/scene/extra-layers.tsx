@@ -11,7 +11,7 @@ import type { RoadPoint } from "@/lib/road-sense/terrain-config";
 import type { RoadDefect, TerrainConfig } from "@/lib/road-sense/types";
 
 export function ElevationWireframe({ config }: { config: TerrainConfig }) {
-  const { geometry } = useMemo(() => buildTerrainGeometry(config, 44), [config]);
+  const { geometry } = useMemo(() => buildTerrainGeometry(config, { segments: 44 }), [config]);
   return (
     <mesh geometry={geometry} position={[0, 0.05, 0]}>
       <meshBasicMaterial color="#35e0d0" wireframe transparent opacity={0.18} />
