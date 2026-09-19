@@ -1,7 +1,24 @@
 import { fbm, ridgedNoise } from "./noise";
+import { deriveInspectionExtras } from "./inspection-data";
 import type { TerrainConfig, TerrainType } from "./types";
 
 export const TERRAIN_SIZE = 220; // world units, plane spans -SIZE/2..SIZE/2
+
+type BaseTerrainConfig = Omit<
+  TerrainConfig,
+  | "crackDensityPct"
+  | "ruttingMm"
+  | "moisturePct"
+  | "failureProbabilityPct"
+  | "predictedFailureDays"
+  | "predictionConfidencePct"
+  | "healthProjected12mo"
+  | "dominantFailureCauses"
+  | "explainableFactors"
+  | "pavementLayers"
+  | "repairOptions"
+  | "recommendedRepair"
+>;
 
 const SEEDS: Record<TerrainType, number> = {
   plains: 101,
@@ -12,7 +29,7 @@ const SEEDS: Record<TerrainType, number> = {
   urban: 606,
 };
 
-export const TERRAIN_CONFIGS: Record<TerrainType, TerrainConfig> = {
+const BASE_TERRAIN_CONFIGS: Record<TerrainType, BaseTerrainConfig> = {
   plains: {
     id: "plains",
     label: "Plains",
@@ -310,6 +327,13 @@ export const TERRAIN_CONFIGS: Record<TerrainType, TerrainConfig> = {
 };
 
 export const TERRAIN_ORDER: TerrainType[] = ["plains", "hilly", "mountain", "desert", "forest", "urban"];
+
+export const TERRAIN_CONFIGS: Record<TerrainType, TerrainConfig> = Object.fromEntries(
+  (Object.entries(BASE_TERRAIN_CONFIGS) as [TerrainType, BaseTerrainConfig][]).map(([type, base]) => [
+    type,
+    { ...base, ...deriveInspectionExtras(base, type) },
+  ]),
+) as Record<TerrainType, TerrainConfig>;
 
 /** World-space terrain height at (x, z) for a given terrain config. */
 export function heightAt(config: TerrainConfig, x: number, z: number): number {

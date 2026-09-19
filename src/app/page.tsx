@@ -12,12 +12,16 @@ import { MiniMap } from "@/components/road-sense/ui/mini-map";
 import { ViewControls } from "@/components/road-sense/ui/view-controls";
 import { DefectPanel } from "@/components/road-sense/ui/defect-panel";
 import { SegmentPanel } from "@/components/road-sense/ui/segment-panel";
+import { InspectionPanel } from "@/components/road-sense/ui/inspection-panel";
+import { WeatherSelector } from "@/components/road-sense/ui/weather-selector";
 import { DroneHud } from "@/components/road-sense/ui/drone-hud";
+import { DriveHud } from "@/components/road-sense/ui/drive-hud";
 import type { CameraCommands, ViewProjection, ViewStyle } from "@/components/road-sense/terrain-canvas";
 import { TERRAIN_CONFIGS, generateRoadPath } from "@/lib/road-sense/terrain-config";
 import { generateDefects } from "@/lib/road-sense/defects-data";
 import { DEFAULT_LAYERS, type LayerKey } from "@/lib/road-sense/layers";
-import type { RoadDefect, TerrainType } from "@/lib/road-sense/types";
+import { usePrefersReducedMotion } from "@/lib/road-sense/use-reduced-motion";
+import type { InspectionMode, RoadDefect, TerrainType, WeatherCondition } from "@/lib/road-sense/types";
 
 const TerrainCanvas = dynamic(() => import("@/components/road-sense/terrain-canvas").then((m) => m.TerrainCanvas), {
   ssr: false,
@@ -27,32 +31,79 @@ export default function RoadSensePage() {
   const [terrainType, setTerrainType] = useState<TerrainType>("mountain");
   const [aiOverlay, setAiOverlay] = useState(false);
   const [droneActive, setDroneActive] = useState(false);
+  const [driveActive, setDriveActive] = useState(false);
   const [layers, setLayers] = useState(DEFAULT_LAYERS);
   const [viewProjection, setViewProjection] = useState<ViewProjection>("3d");
   const [viewStyle, setViewStyle] = useState<ViewStyle>("terrain");
   const [dragMode, setDragMode] = useState<"rotate" | "pan">("rotate");
   const [selectedDefect, setSelectedDefect] = useState<RoadDefect | null>(null);
   const [segmentOpen, setSegmentOpen] = useState(false);
+  const [inspectionMode, setInspectionMode] = useState<InspectionMode | null>(null);
+  const [weather, setWeather] = useState<WeatherCondition>("normal");
   const [mobileSheet, setMobileSheet] = useState(false);
   const [droneT, setDroneT] = useState(0.15);
+  const [driveT, setDriveT] = useState(0.1);
 
   const cameraApiRef = useRef<CameraCommands | null>(null);
   const droneProgressRef = useRef(0.15);
+  const driveProgressRef = useRef(0.1);
+  const reducedMotion = usePrefersReducedMotion();
 
   const config = TERRAIN_CONFIGS[terrainType];
   const path = useMemo(() => generateRoadPath(config), [config]);
   const defects = useMemo(() => generateDefects(config.id, config.seed), [config]);
+  const xray = inspectionMode === "xray";
 
   useEffect(() => {
-    const id = setInterval(() => setDroneT(droneProgressRef.current), 250);
+    const id = setInterval(() => {
+      setDroneT(droneProgressRef.current);
+      setDriveT(driveProgressRef.current);
+    }, 250);
     return () => clearInterval(id);
   }, []);
 
-  function selectTerrain(t: TerrainType) {
-    setTerrainType(t);
+  function toggleDrive(active: boolean) {
+    setDriveActive(active);
+    if (active) {
+      setDroneActive(false);
+      closePanels();
+    }
+  }
+
+  function toggleDrone(active: boolean) {
+    setDroneActive(active);
+    if (active) setDriveActive(false);
+  }
+
+  function closePanels() {
     setSelectedDefect(null);
     setSegmentOpen(false);
+    setInspectionMode(null);
+  }
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.target instanceof HTMLElement && ["INPUT", "TEXTAREA"].includes(e.target.tagName)) return;
+      if (e.key === "Escape") {
+        if (inspectionMode) setInspectionMode(null);
+        else closePanels();
+      } else if (e.key.toLowerCase() === "r") {
+        cameraApiRef.current?.reset();
+      } else if (e.key.toLowerCase() === "i") {
+        setInspectionMode("scan");
+        setSegmentOpen(false);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [inspectionMode]);
+
+  function selectTerrain(t: TerrainType) {
+    setTerrainType(t);
+    closePanels();
     droneProgressRef.current = 0.15;
+    driveProgressRef.current = 0.1;
+    setDriveActive(false);
     cameraApiRef.current?.reset();
   }
 
@@ -73,7 +124,11 @@ export default function RoadSensePage() {
           <TerrainCanvas
             terrainType={terrainType}
             aiOverlay={aiOverlay}
+            xray={xray}
+            weather={weather}
             droneActive={droneActive}
+            driveActive={driveActive}
+            driveProgressRef={driveProgressRef}
             layers={layers}
             viewProjection={viewProjection}
             viewStyle={viewStyle}
@@ -82,10 +137,12 @@ export default function RoadSensePage() {
             onSelectDefect={(d) => {
               setSelectedDefect(d);
               setSegmentOpen(false);
+              setInspectionMode(null);
             }}
             onRoadClick={() => {
               setSegmentOpen(true);
               setSelectedDefect(null);
+              setInspectionMode(null);
             }}
             droneProgressRef={droneProgressRef}
             dragMode={dragMode}
@@ -98,11 +155,21 @@ export default function RoadSensePage() {
             <div className="pointer-events-none flex w-44 shrink-0 flex-col gap-3">
               <TerrainSelector active={terrainType} onSelect={selectTerrain} />
               <LayersPanel layers={layers} onToggle={toggleLayer} />
+              <WeatherSelector weather={weather} onSelect={setWeather} />
             </div>
 
             <div className="pointer-events-none flex flex-col items-center gap-3">
-              <Toolbar config={config} aiOverlay={aiOverlay} setAiOverlay={setAiOverlay} droneActive={droneActive} setDroneActive={setDroneActive} />
+              <Toolbar
+                config={config}
+                aiOverlay={aiOverlay}
+                setAiOverlay={setAiOverlay}
+                droneActive={droneActive}
+                setDroneActive={toggleDrone}
+                driveActive={driveActive}
+                setDriveActive={toggleDrive}
+              />
               {droneActive && <DroneHud onClose={() => setDroneActive(false)} />}
+              {driveActive && <DriveHud config={config} weather={weather} driveT={driveT} onClose={() => setDriveActive(false)} />}
             </div>
 
             <RightPanels config={config} />
@@ -125,8 +192,17 @@ export default function RoadSensePage() {
         {/* mobile overlay chrome */}
         <div className="pointer-events-none absolute inset-0 flex flex-col gap-2.5 p-3 lg:hidden">
           <TerrainSelector active={terrainType} onSelect={selectTerrain} className="overflow-x-auto" />
-          <Toolbar config={config} aiOverlay={aiOverlay} setAiOverlay={setAiOverlay} droneActive={droneActive} setDroneActive={setDroneActive} />
+          <Toolbar
+            config={config}
+            aiOverlay={aiOverlay}
+            setAiOverlay={setAiOverlay}
+            droneActive={droneActive}
+            setDroneActive={toggleDrone}
+            driveActive={driveActive}
+            setDriveActive={toggleDrive}
+          />
           {droneActive && <DroneHud onClose={() => setDroneActive(false)} />}
+          {driveActive && <DriveHud config={config} weather={weather} driveT={driveT} onClose={() => setDriveActive(false)} />}
           <div className="flex-1" />
           <div className="flex items-end justify-between gap-2.5">
             <button
@@ -163,14 +239,28 @@ export default function RoadSensePage() {
               <div className="space-y-3">
                 <RightPanels config={config} />
                 <LayersPanel layers={layers} onToggle={toggleLayer} />
+                <WeatherSelector weather={weather} onSelect={setWeather} />
                 <MiniMap path={path} defects={defects} droneT={droneT} onNavigate={navigateMap} />
               </div>
             </div>
           </div>
         )}
 
-        {selectedDefect && <DefectPanel defect={selectedDefect} onClose={() => setSelectedDefect(null)} />}
-        {segmentOpen && !selectedDefect && <SegmentPanel config={config} onClose={() => setSegmentOpen(false)} />}
+        {inspectionMode && (
+          <InspectionPanel
+            config={config}
+            mode={inspectionMode}
+            onModeChange={setInspectionMode}
+            onClose={() => setInspectionMode(null)}
+            reducedMotion={reducedMotion}
+          />
+        )}
+        {!inspectionMode && selectedDefect && (
+          <DefectPanel defect={selectedDefect} onClose={() => setSelectedDefect(null)} onInspect={() => setInspectionMode("scan")} />
+        )}
+        {!inspectionMode && segmentOpen && !selectedDefect && (
+          <SegmentPanel config={config} onClose={() => setSegmentOpen(false)} onInspect={() => setInspectionMode("scan")} />
+        )}
       </div>
     </div>
   );

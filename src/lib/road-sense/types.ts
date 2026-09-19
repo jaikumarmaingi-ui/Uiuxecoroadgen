@@ -48,6 +48,41 @@ export interface RoadDefect {
   risk: "LOW" | "MODERATE" | "HIGH" | "CRITICAL";
 }
 
+export type WeatherCondition = "normal" | "monsoon" | "snow" | "freeze-thaw" | "landslide";
+
+export type InspectionMode = "scan" | "explode" | "xray" | "predict" | "repair";
+
+export interface PavementLayer {
+  name: string;
+  thicknessMm: number;
+  material: string;
+  condition: "Good" | "Moderate" | "Poor" | "Critical";
+  contributionPct: number; // contribution to failure probability
+}
+
+export interface ExplainableFactor {
+  factor: string;
+  contributionPct: number;
+}
+
+export type RepairMethod = "PATCH_REPAIR" | "MILLING_OVERLAY" | "SUSTAINABLE_REHABILITATION";
+
+export interface RoadRepairOption {
+  id: RepairMethod;
+  label: string;
+  description: string;
+  costLakh: number;
+  expectedLifeYears: number;
+  embodiedCo2: "Lower" | "Moderate" | "High" | "Highest";
+}
+
+export interface SustainabilityImpact {
+  materialSavedTons: number;
+  co2ReductionPct: number;
+  landfillDiversionTons: number;
+  serviceLifeGainYears: number;
+}
+
 export interface TerrainConfig {
   id: TerrainType;
   label: string;
@@ -80,4 +115,17 @@ export interface TerrainConfig {
   roadLengthKm: number;
   defectCounts: { critical: number; moderate: number; low: number; total: number };
   segment: { id: string; lengthKm: number; avgHealth: number; repairCostLakh: number; maintenanceWindow: string };
+
+  crackDensityPct: number;
+  ruttingMm: number;
+  moisturePct: number;
+  failureProbabilityPct: number;
+  predictedFailureDays: number;
+  predictionConfidencePct: number;
+  healthProjected12mo: number;
+  dominantFailureCauses: string[];
+  explainableFactors: ExplainableFactor[];
+  pavementLayers: PavementLayer[];
+  repairOptions: RoadRepairOption[];
+  recommendedRepair: RepairMethod;
 }
