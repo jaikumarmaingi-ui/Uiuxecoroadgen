@@ -335,8 +335,7 @@ export const TERRAIN_CONFIGS: Record<TerrainType, TerrainConfig> = Object.fromEn
   ]),
 ) as Record<TerrainType, TerrainConfig>;
 
-/** World-space terrain height at (x, z) for a given terrain config. */
-export function heightAt(config: TerrainConfig, x: number, z: number): number {
+function rawHeightAt(config: TerrainConfig, x: number, z: number): number {
   const s = config.noiseScale;
   let h: number;
   if (config.id === "mountain") {
@@ -351,6 +350,31 @@ export function heightAt(config: TerrainConfig, x: number, z: number): number {
     h += fbm(x * s * 6, z * s * 6, config.seed + 2, 2) * config.roughness * 0.3;
   }
   return h * config.heightScale;
+}
+
+/** World-space terrain height at (x, z) for a given terrain config. */
+export function heightAt(config: TerrainConfig, x: number, z: number): number {
+  if (config.id !== "mountain") return rawHeightAt(config, x, z);
+
+  // Ridged noise creates sharp mathematical cusps at every ridge line, which
+  // reads as a uniform field of thin spikes rather than a real mountain range
+  // with rounded shoulders. A small 3x3 blur kernel (evaluated continuously,
+  // not tied to mesh resolution) rounds those cusps off. Used here rather
+  // than in the mesh builder so the road, vegetation, rocks and drone/vehicle
+  // following all sample the same smoothed surface, not a raw one the mesh
+  // then diverges from.
+  const e = 1.6;
+  const c = rawHeightAt(config, x, z);
+  const l = rawHeightAt(config, x - e, z);
+  const r = rawHeightAt(config, x + e, z);
+  const d = rawHeightAt(config, x, z - e);
+  const u = rawHeightAt(config, x, z + e);
+  const dl = rawHeightAt(config, x - e, z - e);
+  const dr = rawHeightAt(config, x + e, z - e);
+  const ul = rawHeightAt(config, x - e, z + e);
+  const ur = rawHeightAt(config, x + e, z + e);
+  const blurred = (c * 4 + (l + r + d + u) * 2 + dl + dr + ul + ur) / 16;
+  return c * 0.3 + blurred * 0.7;
 }
 
 export interface RoadPoint {
