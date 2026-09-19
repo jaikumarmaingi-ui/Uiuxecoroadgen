@@ -3,7 +3,7 @@
 import { X, Route } from "lucide-react";
 import type { TerrainConfig } from "@/lib/road-sense/types";
 
-export function SegmentPanel({ config, onClose }: { config: TerrainConfig; onClose: () => void }) {
+export function SegmentPanel({ config, onClose, onInspect }: { config: TerrainConfig; onClose: () => void; onInspect: () => void }) {
   const s = config.segment;
   const d = config.defectCounts;
   return (
@@ -38,6 +38,12 @@ export function SegmentPanel({ config, onClose }: { config: TerrainConfig; onClo
           <span className="text-text-tertiary">Estimated Repair Cost</span>
           <span className="font-mono-tech font-bold text-text-primary">₹{s.repairCostLakh} Lakh</span>
         </div>
+        <button
+          onClick={onInspect}
+          className="w-full rounded-lg bg-cyan py-2 text-xs font-bold uppercase tracking-wide text-text-inverse transition-opacity hover:opacity-90"
+        >
+          Inspect Segment
+        </button>
       </div>
     </div>
   );

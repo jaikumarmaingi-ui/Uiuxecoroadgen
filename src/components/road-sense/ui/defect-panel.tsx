@@ -15,7 +15,7 @@ function daysAgo(iso: string) {
   return Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 86400000));
 }
 
-export function DefectPanel({ defect, onClose }: { defect: RoadDefect; onClose: () => void }) {
+export function DefectPanel({ defect, onClose, onInspect }: { defect: RoadDefect; onClose: () => void; onInspect: () => void }) {
   const color = SEVERITY_COLOR[defect.severity];
   return (
     <div className="glass-panel pointer-events-auto absolute bottom-24 left-1/2 z-40 max-h-[65vh] w-[340px] max-w-[calc(100vw-2rem)] -translate-x-1/2 overflow-y-auto rounded-xl border border-hairline-strong shadow-2xl">
@@ -59,7 +59,10 @@ export function DefectPanel({ defect, onClose }: { defect: RoadDefect; onClose: 
           </div>
         </div>
 
-        <button className="w-full rounded-lg bg-cyan py-2 text-xs font-bold uppercase tracking-wide text-text-inverse transition-opacity hover:opacity-90">
+        <button
+          onClick={onInspect}
+          className="w-full rounded-lg bg-cyan py-2 text-xs font-bold uppercase tracking-wide text-text-inverse transition-opacity hover:opacity-90"
+        >
           View Analysis
         </button>
       </div>

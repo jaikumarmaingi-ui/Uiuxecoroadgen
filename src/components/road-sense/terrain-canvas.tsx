@@ -13,9 +13,12 @@ import { Buildings } from "./scene/buildings";
 import { DefectMarkers } from "./scene/defect-markers";
 import { Drone } from "./scene/drone";
 import { ElevationWireframe, RiskZoneHalos, CoverageStrip, TrafficDots, DrainageFlow, BridgeDecks } from "./scene/extra-layers";
+import { WeatherEffects } from "./scene/weather-effects";
 import { TERRAIN_CONFIGS, TERRAIN_SIZE, generateRoadPath } from "@/lib/road-sense/terrain-config";
 import { generateDefects } from "@/lib/road-sense/defects-data";
-import type { TerrainType, RoadDefect } from "@/lib/road-sense/types";
+import { WEATHER_ENVIRONMENT } from "@/lib/road-sense/weather";
+import { usePrefersReducedMotion } from "@/lib/road-sense/use-reduced-motion";
+import type { TerrainType, RoadDefect, WeatherCondition } from "@/lib/road-sense/types";
 import type { LayerKey } from "@/lib/road-sense/layers";
 
 export interface CameraCommands {
@@ -125,6 +128,8 @@ function CameraRig({
 function Scene({
   terrainType,
   aiOverlay,
+  xray,
+  weather,
   droneActive,
   layers,
   viewStyle,
@@ -135,6 +140,8 @@ function Scene({
 }: {
   terrainType: TerrainType;
   aiOverlay: boolean;
+  xray: boolean;
+  weather: WeatherCondition;
   droneActive: boolean;
   layers: Record<LayerKey, boolean>;
   viewStyle: ViewStyle;
@@ -146,11 +153,14 @@ function Scene({
   const config = TERRAIN_CONFIGS[terrainType];
   const path = useMemo(() => generateRoadPath(config), [config]);
   const defects = useMemo(() => generateDefects(config.id, config.seed), [config]);
+  const reducedMotion = usePrefersReducedMotion();
+  const weatherEnv = WEATHER_ENVIRONMENT[weather];
+  const bgColor = viewStyle === "satellite" ? "#161a1d" : (weatherEnv.tint ?? config.fogColor);
 
   return (
     <>
-      <color attach="background" args={[viewStyle === "satellite" ? "#161a1d" : config.fogColor]} />
-      <fog attach="fog" args={[viewStyle === "satellite" ? "#161a1d" : config.fogColor, config.fogNear, config.fogFar]} />
+      <color attach="background" args={[bgColor]} />
+      <fog attach="fog" args={[bgColor, config.fogNear * weatherEnv.fogNearMul, config.fogFar * weatherEnv.fogFarMul]} />
       <hemisphereLight args={["#6f8caf", "#181510", 0.4]} />
       <directionalLight
         position={[60, 90, 30]}
@@ -165,9 +175,9 @@ function Scene({
       />
 
       <TerrainMesh config={config} />
-      {layers.water && <WaterPlane config={config} />}
+      {layers.water && <WaterPlane config={config} weather={weather} />}
       {layers.roads && (
-        <RoadRibbon path={path} width={config.roadWidth} defects={defects} aiOverlay={aiOverlay} onClick={onRoadClick} />
+        <RoadRibbon path={path} width={config.roadWidth} defects={defects} aiOverlay={aiOverlay} xray={xray} onClick={onRoadClick} />
       )}
       {layers.vegetation && <Vegetation config={config} path={path} />}
       {layers.soil && <Rocks config={config} path={path} />}
@@ -182,6 +192,8 @@ function Scene({
       {layers.drainage && <DrainageFlow config={config} path={path} />}
       {layers.bridges && <BridgeDecks config={config} path={path} />}
 
+      <WeatherEffects config={config} weather={weather} reducedMotion={reducedMotion} />
+
       <Drone path={path} active={droneActive} progressRef={droneProgressRef} />
     </>
   );
@@ -190,6 +202,8 @@ function Scene({
 export function TerrainCanvas({
   terrainType,
   aiOverlay,
+  xray = false,
+  weather = "normal",
   droneActive,
   layers,
   viewProjection,
@@ -203,6 +217,8 @@ export function TerrainCanvas({
 }: {
   terrainType: TerrainType;
   aiOverlay: boolean;
+  xray?: boolean;
+  weather?: WeatherCondition;
   droneActive: boolean;
   layers: Record<LayerKey, boolean>;
   viewProjection: ViewProjection;
@@ -222,6 +238,8 @@ export function TerrainCanvas({
       <Scene
         terrainType={terrainType}
         aiOverlay={aiOverlay}
+        xray={xray}
+        weather={weather}
         droneActive={droneActive}
         layers={layers}
         viewStyle={viewStyle}
