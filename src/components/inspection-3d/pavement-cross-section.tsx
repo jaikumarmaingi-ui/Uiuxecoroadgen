@@ -32,8 +32,6 @@ export function PavementCrossSection({
   const layerRefs = useRef<(THREE.Mesh | null)[]>([]);
   const growth = useRef(0);
   const groupScaleRef = useRef<THREE.Group>(null);
-  const platformRef = useRef<THREE.Mesh>(null);
-  const ringRef = useRef<THREE.Mesh>(null);
 
   const layers = useMemo(
     () =>
@@ -52,9 +50,11 @@ export function PavementCrossSection({
       const s = THREE.MathUtils.clamp(growth.current, 0.001, 1);
       groupScaleRef.current.scale.setScalar(s);
       // Lift out of the pit as it explodes, back into it as it collapses.
+      // At rest the surface course is flush with the carriageway it was cut
+      // from — half a layer down, since the layers are centred on their own y.
       groupScaleRef.current.position.y = THREE.MathUtils.damp(
         groupScaleRef.current.position.y,
-        exploded ? LAYER_EXPLODE_RISE : 0,
+        exploded ? LAYER_EXPLODE_RISE : -LAYER_THICKNESS / 2,
         4.5,
         delta,
       );
@@ -68,30 +68,11 @@ export function PavementCrossSection({
       mesh.position.y = THREE.MathUtils.damp(mesh.position.y, targetY, 4.5, delta);
     });
 
-    // Keep the pit floor tracking just beneath the deepest visible layer,
-    // whether the stack is collapsed or exploded, instead of leaving a large
-    // empty shaft when collapsed.
-    const deepest = layerRefs.current[layers.length - 1];
-    if (deepest && platformRef.current && ringRef.current) {
-      const floorY = deepest.position.y - LAYER_THICKNESS / 2 - 0.2;
-      platformRef.current.position.y = THREE.MathUtils.damp(platformRef.current.position.y, floorY - 0.07, 4.5, delta);
-      ringRef.current.position.y = THREE.MathUtils.damp(ringRef.current.position.y, floorY, 4.5, delta);
-    }
   });
 
   return (
     <group position={position}>
       <group ref={groupScaleRef}>
-        {/* pit floor / base plate — tracks just beneath the deepest layer */}
-        <mesh ref={platformRef} position={[0, -0.5, 0]} receiveShadow>
-          <cylinderGeometry args={[LAYER_FOOTPRINT * 0.85, LAYER_FOOTPRINT * 0.95, 0.15, 24]} />
-          <meshStandardMaterial color="#11151b" roughness={0.9} />
-        </mesh>
-        <mesh ref={ringRef} position={[0, -0.43, 0]}>
-          <cylinderGeometry args={[LAYER_FOOTPRINT * 0.86, LAYER_FOOTPRINT * 0.86, 0.02, 24]} />
-          <meshStandardMaterial color="#35e0d0" emissive="#35e0d0" emissiveIntensity={0.35} transparent opacity={0.18} />
-        </mesh>
-
         {layers.map((layer, i) => (
             <mesh
               key={layer.key}

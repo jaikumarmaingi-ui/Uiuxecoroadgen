@@ -12,8 +12,10 @@ import {
   buildCorridorTerrain,
   buildRoadGeometry,
   corridorHeight,
+  type PitCut,
 } from "@/lib/inspection-3d/terrain";
 import { makeGravelMaps, makeRoadMaps, makeRockMaps, makeTerrainDetailMaps } from "@/lib/inspection-3d/textures";
+import { TrialPit } from "./trial-pit";
 
 function mulberry32(seed: number) {
   let a = seed;
@@ -27,9 +29,9 @@ function mulberry32(seed: number) {
 }
 
 /** Terrain, carriageway, shoulders and roadside furniture for the corridor. */
-export function CorridorEnvironment({ distress = 0.55 }: { distress?: number }) {
-  const terrain = useMemo(() => buildCorridorTerrain(), []);
-  const roadGeometry = useMemo(() => buildRoadGeometry(), []);
+export function CorridorEnvironment({ distress = 0.55, pit }: { distress?: number; pit?: PitCut }) {
+  const terrain = useMemo(() => buildCorridorTerrain({ pit }), [pit]);
+  const roadGeometry = useMemo(() => buildRoadGeometry({ pit }), [pit]);
 
   const roadMaps = useMemo(
     () => makeRoadMaps({ widthM: ROAD_WIDTH_M, lengthM: ROAD_TEXTURE_LENGTH, distress }),
@@ -199,6 +201,8 @@ export function CorridorEnvironment({ distress = 0.55 }: { distress?: number }) 
         <boxGeometry args={[0.07, 0.3, roadLength - 26]} />
         <meshStandardMaterial color="#8d9299" roughness={0.45} metalness={0.78} />
       </mesh>
+
+      {pit && <TrialPit pit={pit} />}
 
       {/* Snow poles — black/white banded, cliff side. */}
       {snowPoles.map((z) => (
