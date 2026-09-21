@@ -14,12 +14,23 @@ import { DefectMarkers } from "./scene/defect-markers";
 import { Drone } from "./scene/drone";
 import { ElevationWireframe, RiskZoneHalos, CoverageStrip, TrafficDots, DrainageFlow, BridgeDecks } from "./scene/extra-layers";
 import { WeatherEffects } from "./scene/weather-effects";
-import { TERRAIN_CONFIGS, TERRAIN_SIZE, generateRoadPath, type RoadPoint } from "@/lib/road-sense/terrain-config";
+import { TERRAIN_CONFIGS, TERRAIN_SIZE, generateRoadPath, heightAt, type RoadPoint } from "@/lib/road-sense/terrain-config";
 import { generateDefects } from "@/lib/road-sense/defects-data";
 import { pointOnRoad } from "@/lib/road-sense/build-road-geometry";
 import { WEATHER_ENVIRONMENT } from "@/lib/road-sense/weather";
 import { usePrefersReducedMotion } from "@/lib/road-sense/use-reduced-motion";
-import type { TerrainType, RoadDefect, WeatherCondition } from "@/lib/road-sense/types";
+import {
+  EYE_HEIGHT,
+  LOOK_SENSITIVITY,
+  MAX_PITCH,
+  WALK_CORRIDOR_HALF,
+  WALK_RUN_MULTIPLIER,
+  WALK_SPEED,
+  createWalkState,
+  nearestOnPath,
+  type WalkState,
+} from "@/lib/road-sense/walk";
+import type { TerrainConfig, TerrainType, RoadDefect, WeatherCondition } from "@/lib/road-sense/types";
 import type { LayerKey } from "@/lib/road-sense/layers";
 
 export interface CameraCommands {
@@ -41,6 +52,150 @@ function droneCamFor(heightScale: number) {
   return new THREE.Vector3(0, camY, camZ);
 }
 
+/**
+ * First-person controller for Walk mode.
+ *
+ * Owns the camera outright while active: WASD moves relative to where the
+ * inspector is looking, pointer drag looks around, and the eye height follows
+ * whichever surface is underfoot — the road deck when on the carriageway, the
+ * terrain when off it. Movement is clamped to a corridor around the road so an
+ * inspector cannot wander off a mountainside into empty space.
+ *
+ * State lives in a ref, not React state: this runs every frame.
+ */
+function WalkRig({
+  active,
+  config,
+  path,
+  walkStateRef,
+}: {
+  active: boolean;
+  config: TerrainConfig;
+  path: RoadPoint[];
+  walkStateRef: React.MutableRefObject<WalkState>;
+}) {
+  const { camera, gl } = useThree();
+  const keys = useRef<Set<string>>(new Set());
+  const dragging = useRef(false);
+  const lastPointer = useRef({ x: 0, y: 0 });
+
+  // Drop the inspector onto the road when the mode opens.
+  useEffect(() => {
+    if (!active || path.length < 2) return;
+    const start = path[Math.floor(path.length * 0.18)];
+    const ahead = path[Math.min(path.length - 1, Math.floor(path.length * 0.18) + 4)];
+    const w = walkStateRef.current;
+    w.x = start.x;
+    w.z = start.z;
+    // Face along the road rather than at whatever the orbit camera last had.
+    // A camera at yaw looks along (-sin yaw, -cos yaw), so to look down the
+    // tangent (dx, dz) the yaw is atan2(-dx, -dz) — not atan2(dx, -dz), which
+    // mirrors the heading and puts you facing the cut face.
+    w.yaw = Math.atan2(-(ahead.x - start.x), -(ahead.z - start.z));
+    w.pitch = -0.05;
+    w.bob = 0;
+  }, [active, path, walkStateRef]);
+
+  useEffect(() => {
+    if (!active) return;
+    const el = gl.domElement;
+
+    function down(e: KeyboardEvent) {
+      if (e.target instanceof HTMLElement && ["INPUT", "TEXTAREA"].includes(e.target.tagName)) return;
+      keys.current.add(e.key.toLowerCase());
+    }
+    function up(e: KeyboardEvent) {
+      keys.current.delete(e.key.toLowerCase());
+    }
+    function pointerDown(e: PointerEvent) {
+      dragging.current = true;
+      lastPointer.current = { x: e.clientX, y: e.clientY };
+      el.setPointerCapture(e.pointerId);
+    }
+    function pointerMove(e: PointerEvent) {
+      if (!dragging.current) return;
+      const w = walkStateRef.current;
+      w.yaw -= (e.clientX - lastPointer.current.x) * LOOK_SENSITIVITY;
+      w.pitch = Math.max(
+        -MAX_PITCH,
+        Math.min(MAX_PITCH, w.pitch - (e.clientY - lastPointer.current.y) * LOOK_SENSITIVITY),
+      );
+      lastPointer.current = { x: e.clientX, y: e.clientY };
+    }
+    function pointerUp(e: PointerEvent) {
+      dragging.current = false;
+      if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
+    }
+
+    const held = keys.current;
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    el.addEventListener("pointerdown", pointerDown);
+    el.addEventListener("pointermove", pointerMove);
+    el.addEventListener("pointerup", pointerUp);
+    el.addEventListener("pointercancel", pointerUp);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+      el.removeEventListener("pointerdown", pointerDown);
+      el.removeEventListener("pointermove", pointerMove);
+      el.removeEventListener("pointerup", pointerUp);
+      el.removeEventListener("pointercancel", pointerUp);
+      held.clear();
+      dragging.current = false;
+    };
+  }, [active, gl, walkStateRef]);
+
+  useFrame((_, rawDelta) => {
+    if (!active || path.length < 2) return;
+    const delta = Math.min(rawDelta, 0.1);
+    const w = walkStateRef.current;
+    const held = keys.current;
+
+    let forward = 0;
+    let strafe = 0;
+    if (held.has("w") || held.has("arrowup")) forward += 1;
+    if (held.has("s") || held.has("arrowdown")) forward -= 1;
+    if (held.has("a") || held.has("arrowleft")) strafe -= 1;
+    if (held.has("d") || held.has("arrowright")) strafe += 1;
+
+    const len = Math.hypot(forward, strafe);
+    w.moving = len > 0.001;
+    if (w.moving) {
+      forward /= len;
+      strafe /= len;
+      const speed = WALK_SPEED * (held.has("shift") ? WALK_RUN_MULTIPLIER : 1) * delta;
+      // Forward is -Z at yaw 0, matching how the rest of the scene is laid out.
+      const sin = Math.sin(w.yaw);
+      const cos = Math.cos(w.yaw);
+      const nx = w.x + (-sin * forward + cos * strafe) * speed;
+      const nz = w.z + (-cos * forward - sin * strafe) * speed;
+
+      // Only commit the step if it stays inside the corridor, so walking into
+      // the boundary stops rather than sliding along an invisible wall.
+      const near = nearestOnPath(path, nx, nz);
+      if (near.dist <= WALK_CORRIDOR_HALF) {
+        w.x = nx;
+        w.z = nz;
+      }
+      w.bob += delta * (held.has("shift") ? 11 : 7);
+    }
+
+    const near = nearestOnPath(path, w.x, w.z);
+    // On the carriageway the deck carries you; off it, the ground does.
+    const onRoad = near.dist < config.roadWidth / 2;
+    const groundY = onRoad ? near.point.y : Math.max(heightAt(config, w.x, w.z), near.point.y - 2.5);
+    const bobY = w.moving ? Math.sin(w.bob) * 0.045 : 0;
+
+    camera.position.set(w.x, groundY + EYE_HEIGHT + bobY, w.z);
+    // One call rather than assigning .order/.x/.y separately: YXZ applies yaw
+    // before pitch, which is what keeps the horizon level as you look around.
+    camera.rotation.set(w.pitch, w.yaw, 0, "YXZ");
+  });
+
+  return null;
+}
+
 function CameraRig({
   projection,
   cameraApiRef,
@@ -48,6 +203,7 @@ function CameraRig({
   heightScale,
   path,
   driveActive,
+  walkActive,
   driveProgressRef,
 }: {
   projection: ViewProjection;
@@ -56,6 +212,7 @@ function CameraRig({
   heightScale: number;
   path: RoadPoint[];
   driveActive: boolean;
+  walkActive: boolean;
   driveProgressRef: React.MutableRefObject<number>;
 }) {
   const { camera } = useThree();
@@ -73,8 +230,9 @@ function CameraRig({
   }, [projection, heightScale]);
 
   useEffect(() => {
-    if (!driveActive) transitioningRef.current = true;
-  }, [driveActive]);
+    // Re-settle the orbit camera whenever a first-person mode hands back.
+    if (!driveActive && !walkActive) transitioningRef.current = true;
+  }, [driveActive, walkActive]);
 
   useEffect(() => {
     cameraApiRef.current = {
@@ -108,6 +266,8 @@ function CameraRig({
   }, [cameraApiRef, projection, heightScale]);
 
   useFrame((_, delta) => {
+    // Walk mode drives the camera itself; stay out of its way entirely.
+    if (walkActive) return;
     if (driveActive && path.length > 1) {
       driveProgressRef.current = (driveProgressRef.current + delta * 0.014) % 1;
       const p = pointOnRoad(path, driveProgressRef.current);
@@ -131,7 +291,7 @@ function CameraRig({
   return (
     <OrbitControls
       ref={controlsRef}
-      enabled={!driveActive}
+      enabled={!driveActive && !walkActive}
       enableDamping
       dampingFactor={0.08}
       minDistance={12}
@@ -236,6 +396,8 @@ export function TerrainCanvas({
   weather = "normal",
   droneActive,
   driveActive = false,
+  walkActive = false,
+  walkStateRef,
   layers,
   viewProjection,
   viewStyle,
@@ -253,6 +415,8 @@ export function TerrainCanvas({
   weather?: WeatherCondition;
   droneActive: boolean;
   driveActive?: boolean;
+  walkActive?: boolean;
+  walkStateRef?: React.MutableRefObject<WalkState>;
   layers: Record<LayerKey, boolean>;
   viewProjection: ViewProjection;
   viewStyle: ViewStyle;
@@ -269,6 +433,8 @@ export function TerrainCanvas({
   const path = useMemo(() => generateRoadPath(config), [config]);
   const fallbackDriveProgress = useRef(0.1);
   const resolvedDriveProgressRef = driveProgressRef ?? fallbackDriveProgress;
+  const fallbackWalkState = useRef<WalkState>(createWalkState());
+  const resolvedWalkStateRef = walkStateRef ?? fallbackWalkState;
 
   return (
     <Canvas shadows="soft" dpr={[1, 1.6]} gl={{ antialias: true }}>
@@ -280,8 +446,10 @@ export function TerrainCanvas({
         heightScale={heightScale}
         path={path}
         driveActive={driveActive}
+        walkActive={walkActive}
         driveProgressRef={resolvedDriveProgressRef}
       />
+      <WalkRig active={walkActive} config={config} path={path} walkStateRef={resolvedWalkStateRef} />
       <Scene
         terrainType={terrainType}
         path={path}

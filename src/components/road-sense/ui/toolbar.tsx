@@ -1,6 +1,6 @@
 "use client";
 
-import { Plane, Car, ScanEye, FlaskConical } from "lucide-react";
+import { Plane, Car, Footprints, ScanEye, FlaskConical } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { TerrainConfig } from "@/lib/road-sense/types";
 
@@ -12,6 +12,8 @@ export function Toolbar({
   setDroneActive,
   driveActive,
   setDriveActive,
+  walkActive,
+  setWalkActive,
 }: {
   config: TerrainConfig;
   aiOverlay: boolean;
@@ -20,6 +22,8 @@ export function Toolbar({
   setDroneActive: (v: boolean) => void;
   driveActive: boolean;
   setDriveActive: (v: boolean) => void;
+  walkActive: boolean;
+  setWalkActive: (v: boolean) => void;
 }) {
   return (
     <div className="pointer-events-auto flex flex-wrap items-center gap-2.5">
@@ -53,6 +57,17 @@ export function Toolbar({
       >
         <Car className="h-3.5 w-3.5" />
         {driveActive ? "Drive Mode Active" : "Start Drive Mode"}
+      </button>
+
+      <button
+        onClick={() => setWalkActive(!walkActive)}
+        className={cn(
+          "glass-panel flex items-center gap-2 rounded-xl border px-3.5 py-2 text-[10px] font-bold uppercase tracking-wide transition-colors",
+          walkActive ? "border-cyan/50 bg-cyan/15 text-cyan" : "border-white/10 text-text-secondary hover:border-white/20",
+        )}
+      >
+        <Footprints className="h-3.5 w-3.5" />
+        {walkActive ? "Walk Mode Active" : "Walk The Corridor"}
       </button>
 
       <button
