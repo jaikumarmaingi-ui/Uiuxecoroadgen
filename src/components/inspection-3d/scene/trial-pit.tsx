@@ -59,7 +59,7 @@ export function TrialPit({ pit }: { pit: PitCut }) {
     () =>
       PAVEMENT_LAYERS.map((layer, i) => ({
         key: layer.key,
-        color: new THREE.Color(layer.baseColor).multiplyScalar(0.82),
+        color: new THREE.Color(layer.baseColor).multiplyScalar(0.96),
         y: strataTopY - (i * LAYER_THICKNESS + LAYER_THICKNESS / 2),
       })),
     [strataTopY],
@@ -137,8 +137,14 @@ export function TrialPit({ pit }: { pit: PitCut }) {
         {/* Survey marker on the rim of the cut. This is the product's cyan
             accent, kept with the opening rather than on the core, so it stays
             put when the core lifts out. */}
+        {/* A 4-segment ring puts its vertices at the given radius, so the
+            square's EDGES land at radius * cos45. Scaling by root-2 is what
+            makes the marker sit just outside the cut instead of on top of
+            the block inside it. */}
         <mesh position={[0, rimY + 0.002, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-          <ringGeometry args={[pit.half + 0.1, pit.half + 0.16, 4, 1, Math.PI / 4]} />
+          <ringGeometry
+            args={[(pit.half + 0.1) * Math.SQRT2, (pit.half + 0.17) * Math.SQRT2, 4, 1, Math.PI / 4]}
+          />
           <meshBasicMaterial color="#35e0d0" transparent opacity={0.5} side={THREE.DoubleSide} depthWrite={false} />
         </mesh>
       </group>
