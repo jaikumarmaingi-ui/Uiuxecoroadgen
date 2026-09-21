@@ -36,8 +36,8 @@ export const APPROACH_RANGE = 16;
 export const PARK_X = 1.4;
 export const PARK_Z = DEFECT_Z + 7;
 export const PARK_HEADING = 0.08;
-export const ROAD_WIDTH = 6;
-export const ROAD_HALF_DRIVABLE = ROAD_WIDTH / 2 - 0.7;
+export const ROAD_WIDTH = 7.2;
+export const ROAD_HALF_DRIVABLE = ROAD_WIDTH / 2 - 0.75;
 export const PIT_POSITION: [number, number, number] = [-4.4, 0, DEFECT_Z];
 
 export function createInitialWorld(): WorldRefState {

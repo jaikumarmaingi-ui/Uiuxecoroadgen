@@ -1,17 +1,44 @@
 import * as THREE from "three";
-import { heightAt, TERRAIN_SIZE } from "./terrain-config";
+import { fbm } from "./noise";
+import { heightAt, TERRAIN_SIZE, type RoadPoint } from "./terrain-config";
 import type { TerrainConfig } from "./types";
 
 function lerp3(a: [number, number, number], b: [number, number, number], t: number): [number, number, number] {
   return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 }
 
-export function buildTerrainGeometry(config: TerrainConfig, segments = 110) {
+const SHOULDER_WIDTH = 3.5; // graded embankment width beyond the road edge
+
+/** Nearest point on the road polyline to (x, z), using path.z's monotonic order to only scan a small window. */
+function nearestRoadPoint(path: RoadPoint[], x: number, z: number, worldHalf: number) {
+  const n = path.length;
+  const tGuess = (z + worldHalf) / (2 * worldHalf);
+  const idxGuess = Math.round(tGuess * (n - 1));
+  const window = 6;
+  let bestDistSq = Infinity;
+  let bestY = 0;
+  for (let k = Math.max(0, idxGuess - window); k <= Math.min(n - 1, idxGuess + window); k++) {
+    const p = path[k];
+    const dx = p.x - x;
+    const dz = p.z - z;
+    const distSq = dx * dx + dz * dz;
+    if (distSq < bestDistSq) {
+      bestDistSq = distSq;
+      bestY = p.y;
+    }
+  }
+  return { dist: Math.sqrt(bestDistSq), y: bestY };
+}
+
+export function buildTerrainGeometry(config: TerrainConfig, opts: { path?: RoadPoint[]; segments?: number } = {}) {
+  const { path, segments = 170 } = opts;
   const half = TERRAIN_SIZE / 2;
   const verts = segments + 1;
   const positions = new Float32Array(verts * verts * 3);
   const colors = new Float32Array(verts * verts * 3);
   const heights = new Float32Array(verts * verts);
+  const roadHalf = config.roadWidth / 2;
+  const gradeZone = roadHalf + SHOULDER_WIDTH;
 
   let minH = Infinity;
   let maxH = -Infinity;
@@ -20,7 +47,21 @@ export function buildTerrainGeometry(config: TerrainConfig, segments = 110) {
     for (let i = 0; i < verts; i++) {
       const x = -half + (i / segments) * TERRAIN_SIZE;
       const z = -half + (j / segments) * TERRAIN_SIZE;
-      const h = heightAt(config, x, z);
+      let h = heightAt(config, x, z);
+
+      // Grade the terrain into a bench along the road so it reads as an
+      // engineered cut/fill embankment instead of the raw slope crashing
+      // through a flat road plane.
+      if (path && path.length > 1) {
+        const { dist, y: roadY } = nearestRoadPoint(path, x, z, half);
+        if (dist < gradeZone) {
+          const benchH = roadY - 0.05;
+          const t = Math.min(1, Math.max(0, (dist - roadHalf) / SHOULDER_WIDTH));
+          const smooth = t * t * (3 - 2 * t);
+          h = benchH + (h - benchH) * smooth;
+        }
+      }
+
       heights[j * verts + i] = h;
       if (h < minH) minH = h;
       if (h > maxH) maxH = h;
@@ -73,6 +114,17 @@ export function buildTerrainGeometry(config: TerrainConfig, segments = 110) {
         const wet = Math.min(1, (config.waterLevel + 0.6 - h) / 1.2);
         color = lerp3(color, [0.12, 0.14, 0.1], wet * 0.5);
       }
+
+      // subtle per-vertex tint jitter — breaks up flat gradient bands so large
+      // faces read as weathered rock/soil rather than smooth painted planes
+      const vx = positions[idx * 3];
+      const vz = positions[idx * 3 + 2];
+      const jitter = fbm(vx * 0.35, vz * 0.35, config.seed + 9, 2) * 0.045;
+      color = [
+        Math.min(1, Math.max(0, color[0] + jitter)),
+        Math.min(1, Math.max(0, color[1] + jitter)),
+        Math.min(1, Math.max(0, color[2] + jitter)),
+      ];
 
       const cidx = idx * 3;
       colors[cidx] = color[0];

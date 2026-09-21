@@ -185,20 +185,26 @@ function Scene({
     <>
       <color attach="background" args={[bgColor]} />
       <fog attach="fog" args={[bgColor, config.fogNear * weatherEnv.fogNearMul, config.fogFar * weatherEnv.fogFarMul]} />
-      <hemisphereLight args={["#6f8caf", "#181510", 0.4]} />
+      <hemisphereLight args={["#7fa0bf", "#2a2318", 0.65]} />
       <directionalLight
         position={[60, 90, 30]}
-        intensity={1.15}
+        intensity={0.95}
         castShadow
         shadow-mapSize={[2048, 2048]}
+        shadow-radius={4}
+        shadow-bias={-0.0006}
         shadow-camera-left={-90}
         shadow-camera-right={90}
         shadow-camera-top={90}
         shadow-camera-bottom={-90}
         shadow-camera-far={260}
       />
+      {/* low, shadowless fill light — lifts shadow-side blacks so slopes read as
+          naturally shaded rock instead of high-contrast cut paper */}
+      <directionalLight position={[-50, 35, -60]} intensity={0.28} color="#9fb8d0" />
+      <ambientLight intensity={0.12} />
 
-      <TerrainMesh config={config} />
+      <TerrainMesh config={config} path={path} />
       {layers.water && <WaterPlane config={config} weather={weather} />}
       {layers.roads && (
         <RoadRibbon path={path} width={config.roadWidth} defects={defects} aiOverlay={aiOverlay} xray={xray} onClick={onRoadClick} />
@@ -265,7 +271,7 @@ export function TerrainCanvas({
   const resolvedDriveProgressRef = driveProgressRef ?? fallbackDriveProgress;
 
   return (
-    <Canvas shadows dpr={[1, 1.6]} gl={{ antialias: true }}>
+    <Canvas shadows="soft" dpr={[1, 1.6]} gl={{ antialias: true }}>
       <PerspectiveCamera makeDefault position={BASE_CAM.toArray()} fov={48} near={0.5} far={500} />
       <CameraRig
         projection={viewProjection}
