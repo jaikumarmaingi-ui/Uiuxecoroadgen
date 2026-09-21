@@ -16,11 +16,20 @@ import { InspectionPanel } from "@/components/road-sense/ui/inspection-panel";
 import { WeatherSelector } from "@/components/road-sense/ui/weather-selector";
 import { DroneHud } from "@/components/road-sense/ui/drone-hud";
 import { DriveHud } from "@/components/road-sense/ui/drive-hud";
+import { WalkHud } from "@/components/road-sense/ui/walk-hud";
 import type { CameraCommands, ViewProjection, ViewStyle } from "@/components/road-sense/terrain-canvas";
 import { TERRAIN_CONFIGS, generateRoadPath } from "@/lib/road-sense/terrain-config";
 import { generateDefects } from "@/lib/road-sense/defects-data";
 import { DEFAULT_LAYERS, type LayerKey } from "@/lib/road-sense/layers";
 import { usePrefersReducedMotion } from "@/lib/road-sense/use-reduced-motion";
+import {
+  chainageMetresBetween,
+  createWalkState,
+  nearestDefectTo,
+  nearestOnPath,
+  stanceFor,
+  type NearestDefect,
+} from "@/lib/road-sense/walk";
 import type { InspectionMode, RoadDefect, TerrainType, WeatherCondition } from "@/lib/road-sense/types";
 
 const TerrainCanvas = dynamic(() => import("@/components/road-sense/terrain-canvas").then((m) => m.TerrainCanvas), {
@@ -32,6 +41,7 @@ export default function RoadSensePage() {
   const [aiOverlay, setAiOverlay] = useState(false);
   const [droneActive, setDroneActive] = useState(false);
   const [driveActive, setDriveActive] = useState(false);
+  const [walkActive, setWalkActive] = useState(false);
   const [layers, setLayers] = useState(DEFAULT_LAYERS);
   const [viewProjection, setViewProjection] = useState<ViewProjection>("3d");
   const [viewStyle, setViewStyle] = useState<ViewStyle>("terrain");
@@ -43,10 +53,14 @@ export default function RoadSensePage() {
   const [mobileSheet, setMobileSheet] = useState(false);
   const [droneT, setDroneT] = useState(0.15);
   const [driveT, setDriveT] = useState(0.1);
+  // Polled from the walk rig's ref rather than driven by it: the rig runs at
+  // frame rate, and the HUD only needs to be current, not per-frame exact.
+  const [walkPos, setWalkPos] = useState({ x: 0, z: 0 });
 
   const cameraApiRef = useRef<CameraCommands | null>(null);
   const droneProgressRef = useRef(0.15);
   const driveProgressRef = useRef(0.1);
+  const walkStateRef = useRef(createWalkState());
   const reducedMotion = usePrefersReducedMotion();
 
   const config = TERRAIN_CONFIGS[terrainType];
@@ -54,25 +68,65 @@ export default function RoadSensePage() {
   const defects = useMemo(() => generateDefects(config.id, config.seed), [config]);
   const xray = inspectionMode === "xray";
 
+  // Walk telemetry, derived from the polled position against the same path and
+  // defect set the scene draws from.
+  const walkNear = useMemo(() => nearestOnPath(path, walkPos.x, walkPos.z), [path, walkPos]);
+  const walkNearestDefect = useMemo(
+    () => nearestDefectTo(defects, path, config.roadWidth, walkPos.x, walkPos.z),
+    [defects, path, config.roadWidth, walkPos],
+  );
+  // Reported as distance along the corridor, which the scene's stylised world
+  // units cannot honestly express — see chainageMetresBetween.
+  const walkNearestDistM = walkNearestDefect
+    ? chainageMetresBetween(walkNear.t, walkNearestDefect.defect.t, config.roadLengthKm)
+    : 0;
+
   useEffect(() => {
     const id = setInterval(() => {
       setDroneT(droneProgressRef.current);
       setDriveT(driveProgressRef.current);
+      setWalkPos({ x: walkStateRef.current.x, z: walkStateRef.current.z });
     }, 250);
     return () => clearInterval(id);
   }, []);
 
+  // Drive, Walk and Drone each take over the camera, so entering one leaves
+  // the others.
   function toggleDrive(active: boolean) {
     setDriveActive(active);
     if (active) {
       setDroneActive(false);
+      setWalkActive(false);
       closePanels();
     }
   }
 
+  function toggleWalk(active: boolean) {
+    setWalkActive(active);
+    if (active) {
+      setDroneActive(false);
+      setDriveActive(false);
+      closePanels();
+    }
+  }
+
+  /**
+   * Open the defect panel for whatever the inspector is standing next to.
+   * Leaves Walk mode running: the point is to read the detail while still in
+   * front of the defect, not to be yanked back to the orbit camera.
+   */
+  function inspectNearestDefect(nearest: NearestDefect) {
+    setSelectedDefect(nearest.defect);
+    setSegmentOpen(false);
+    setInspectionMode(null);
+  }
+
   function toggleDrone(active: boolean) {
     setDroneActive(active);
-    if (active) setDriveActive(false);
+    if (active) {
+      setDriveActive(false);
+      setWalkActive(false);
+    }
   }
 
   function closePanels() {
@@ -104,6 +158,7 @@ export default function RoadSensePage() {
     droneProgressRef.current = 0.15;
     driveProgressRef.current = 0.1;
     setDriveActive(false);
+    setWalkActive(false);
     cameraApiRef.current?.reset();
   }
 
@@ -129,6 +184,8 @@ export default function RoadSensePage() {
             droneActive={droneActive}
             driveActive={driveActive}
             driveProgressRef={driveProgressRef}
+            walkActive={walkActive}
+            walkStateRef={walkStateRef}
             layers={layers}
             viewProjection={viewProjection}
             viewStyle={viewStyle}
@@ -167,9 +224,22 @@ export default function RoadSensePage() {
                 setDroneActive={toggleDrone}
                 driveActive={driveActive}
                 setDriveActive={toggleDrive}
+                walkActive={walkActive}
+                setWalkActive={toggleWalk}
               />
               {droneActive && <DroneHud onClose={() => setDroneActive(false)} />}
               {driveActive && <DriveHud config={config} weather={weather} driveT={driveT} onClose={() => setDriveActive(false)} />}
+              {walkActive && (
+                <WalkHud
+                  config={config}
+                  walkKm={walkNear.t * config.roadLengthKm}
+                  stance={stanceFor(walkNear.dist, config.roadWidth)}
+                  nearest={walkNearestDefect}
+                  nearestDistM={walkNearestDistM}
+                  onClose={() => setWalkActive(false)}
+                  onInspectNearest={inspectNearestDefect}
+                />
+              )}
             </div>
 
             <RightPanels config={config} />
@@ -200,9 +270,22 @@ export default function RoadSensePage() {
             setDroneActive={toggleDrone}
             driveActive={driveActive}
             setDriveActive={toggleDrive}
+            walkActive={walkActive}
+            setWalkActive={toggleWalk}
           />
           {droneActive && <DroneHud onClose={() => setDroneActive(false)} />}
           {driveActive && <DriveHud config={config} weather={weather} driveT={driveT} onClose={() => setDriveActive(false)} />}
+          {walkActive && (
+            <WalkHud
+              config={config}
+              walkKm={walkNear.t * config.roadLengthKm}
+              stance={stanceFor(walkNear.dist, config.roadWidth)}
+              nearest={walkNearestDefect}
+              nearestDistM={walkNearestDistM}
+              onClose={() => setWalkActive(false)}
+              onInspectNearest={inspectNearestDefect}
+            />
+          )}
           <div className="flex-1" />
           <div className="flex items-end justify-between gap-2.5">
             <button
