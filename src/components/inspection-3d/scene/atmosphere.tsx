@@ -1,69 +1,110 @@
 "use client";
 
+import { useEffect, useMemo, useRef } from "react";
+import { useFrame } from "@react-three/fiber";
 import { Environment, Sky } from "@react-three/drei";
 import * as THREE from "three";
+import type { CorridorRegime } from "@/lib/inspection-3d/regimes";
 
 /**
- * Mid-afternoon sun, behind and to the right of the driver. Keeping it behind
- * the direction of travel is deliberate: the corridor ahead is lit rather than
- * silhouetted, the cut face on the left takes the light square-on, and the
- * camera never stares into the glare. Every light here derives from this one
- * vector, so the sky, the shadows and the fill stay physically consistent.
+ * Sky, sun and haze for a corridor.
+ *
+ * Every light derives from the regime's one sun vector, so the sky, the
+ * shadows, the reflection probe and the fill stay physically consistent with
+ * each other. The sun sits behind the direction of travel in every regime:
+ * the corridor ahead is lit rather than silhouetted, the cut face takes the
+ * light square-on, and the camera never stares into the glare.
+ *
+ * The sun rides with the action. A shadow frustum tight enough to resolve
+ * kerbs and cones covers about 120 units; the drivable corridor is more than
+ * a kilometre. Widening the frustum to fit would throw away all its texel
+ * density, so instead the whole light rig translates along Z to stay over
+ * wherever the inspector is.
  */
-export const SUN_POSITION = new THREE.Vector3(132, 74, 104);
+export function Atmosphere({
+  regime,
+  focusZRef,
+}: {
+  regime: CorridorRegime;
+  /** World Z the shadow frustum should stay centred on. */
+  focusZRef?: React.RefObject<number>;
+}) {
+  const s = regime.sky;
+  const sun = useMemo(() => new THREE.Vector3(...s.sunPosition), [s.sunPosition]);
 
-/** Haze colour, matched to the sky near the horizon for aerial perspective. */
-export const FOG_COLOR = "#7d94ab";
-export const FOG_NEAR = 60;
-export const FOG_FAR = 450;
+  const rigRef = useRef<THREE.Group>(null);
+  const lightRef = useRef<THREE.DirectionalLight>(null);
+  const targetRef = useRef<THREE.Object3D>(null);
 
-export function Atmosphere() {
+  // Aim the light at a target inside its own rig, so translating the rig moves
+  // the shadow frustum without changing the light's direction.
+  useEffect(() => {
+    const light = lightRef.current;
+    const target = targetRef.current;
+    if (light && target) light.target = target;
+  }, []);
+
+  useFrame((_, rawDelta) => {
+    const rig = rigRef.current;
+    if (!rig || !focusZRef) return;
+    const delta = Math.min(rawDelta, 0.1);
+    // Damped, so the shadow map is not re-rendered against a jittering frustum.
+    rig.position.setZ(THREE.MathUtils.damp(rig.position.z, focusZRef.current, 6, delta));
+  });
+
   return (
     <>
       {/* Reflection probe. Glass, chrome and wet asphalt need something to
           reflect; without it every smooth material renders as a black void.
-          Rendering the same sky into a small cubemap once (frames={1}) is
-          enough, and costs nothing per frame. */}
-      <Environment frames={1} resolution={128} background={false} environmentIntensity={0.32}>
-        <Sky distance={4500} sunPosition={SUN_POSITION} turbidity={4} rayleigh={0.9} />
-        {/* Ground half of the probe: warm bounce off rock, not black. */}
+          Rendering the sky into a small cubemap once (frames={1}) is enough,
+          and costs nothing per frame. */}
+      <Environment
+        key={`${regime.id}-probe`}
+        frames={1}
+        resolution={128}
+        background={false}
+        environmentIntensity={0.32}
+      >
+        <Sky distance={4500} sunPosition={sun} turbidity={s.turbidity} rayleigh={s.rayleigh * 0.95} />
+        {/* Ground half of the probe: bounce off the local ground, not black. */}
         <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, -14, 0]}>
           <circleGeometry args={[220, 24]} />
-          <meshBasicMaterial color="#4a4238" />
+          <meshBasicMaterial color={s.hemiGround} />
         </mesh>
       </Environment>
 
       <Sky
         distance={4500}
-        sunPosition={SUN_POSITION}
-        // Thin, high-altitude air: modest turbidity and Rayleigh keep the
-        // zenith deep and the horizon haze pale without blowing out.
-        turbidity={4}
-        rayleigh={0.95}
+        sunPosition={sun}
+        turbidity={s.turbidity}
+        rayleigh={s.rayleigh}
         mieCoefficient={0.004}
         mieDirectionalG={0.78}
       />
-      <fog attach="fog" args={[FOG_COLOR, FOG_NEAR, FOG_FAR]} />
+      <fog attach="fog" args={[s.fogColor, s.fogNear, s.fogFar]} />
 
-      {/* Key: the sun itself. */}
-      <directionalLight
-        position={SUN_POSITION}
-        intensity={2.35}
-        color="#fff0dd"
-        castShadow
-        shadow-mapSize={[2048, 2048]}
-        shadow-bias={-0.0004}
-        shadow-normalBias={0.025}
-      >
-        <orthographicCamera attach="shadow-camera" args={[-60, 60, 60, -60, 1, 380]} />
-      </directionalLight>
+      <group ref={rigRef}>
+        <directionalLight
+          ref={lightRef}
+          position={sun}
+          intensity={s.sunIntensity}
+          color={s.sunColor}
+          castShadow
+          shadow-mapSize={[2048, 2048]}
+          shadow-bias={-0.0004}
+          shadow-normalBias={0.025}
+        >
+          <orthographicCamera attach="shadow-camera" args={[-62, 62, 62, -62, 1, 420]} />
+        </directionalLight>
+        <object3D ref={targetRef} />
+      </group>
 
-      {/* Sky fill: cool light from above, warm bounce off the rock below. */}
-      <hemisphereLight args={["#aecbe8", "#6b5a44", 0.26]} />
+      {/* Sky fill: cool light from above, bounce off the ground below. */}
+      <hemisphereLight args={[s.hemiSky, s.hemiGround, s.hemiIntensity]} />
 
       {/* A dim counter-light so shadow sides keep some shape instead of
           crushing to black once tone mapping is applied. */}
-      <directionalLight position={[-120, 26, -90]} intensity={0.16} color="#9ec0e4" />
+      <directionalLight position={[-sun.x, 26, -sun.z]} intensity={0.16} color="#9ec0e4" />
       <ambientLight intensity={0.04} />
     </>
   );

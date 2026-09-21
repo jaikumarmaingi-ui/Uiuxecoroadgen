@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Car,
@@ -25,7 +25,14 @@ import { RISK_META } from "@/lib/risk";
 import { repairOptionsFor } from "@/lib/mock-data";
 import type { RoadSegment } from "@/lib/types";
 import { layerInspectionFor } from "./pavement-layers";
-import type { FlowState } from "./types";
+import { FAILURE_META, type CorridorRegime } from "@/lib/inspection-3d/regimes";
+import {
+  SEVERITY_HEX,
+  SEVERITY_LABEL,
+  type CorridorDefect,
+} from "@/lib/inspection-3d/corridor-defects";
+import { ROAD_LENGTH_M, ROAD_START_Z } from "@/lib/inspection-3d/terrain";
+import type { FlowState, WorldRefState } from "./types";
 
 const DISTRESS_LABELS: { key: keyof RoadSegment["distress"]; label: string }[] = [
   { key: "cracking", label: "Cracking" },
@@ -39,6 +46,13 @@ const DISTRESS_LABELS: { key: keyof RoadSegment["distress"]; label: string }[] =
 export function InspectionHUD({
   flow,
   segment,
+  regime,
+  defects,
+  activeDefect,
+  defectIndex,
+  remaining,
+  isLast,
+  world,
   selectedLayer,
   onSelectLayer,
   onEnterWorld,
@@ -47,10 +61,18 @@ export function InspectionHUD({
   onInspectRoad,
   onExplodeLayers,
   onTriggerAI,
+  onContinue,
   onRestart,
 }: {
   flow: FlowState;
   segment: RoadSegment;
+  regime: CorridorRegime;
+  defects: CorridorDefect[];
+  activeDefect: CorridorDefect | null;
+  defectIndex: number;
+  remaining: number;
+  isLast: boolean;
+  world: React.RefObject<WorldRefState>;
   selectedLayer: number | null;
   onSelectLayer: (index: number | null) => void;
   onEnterWorld: () => void;
@@ -59,6 +81,7 @@ export function InspectionHUD({
   onInspectRoad: () => void;
   onExplodeLayers: () => void;
   onTriggerAI: () => void;
+  onContinue: () => void;
   onRestart: () => void;
 }) {
   const router = useRouter();
@@ -79,7 +102,7 @@ export function InspectionHUD({
             <ShieldCheck className="h-4 w-4 text-cyan" />
             <div>
               <div className="font-display text-xs font-bold text-text-primary sm:text-sm">
-                {segment.routeNumber} · {segment.segmentLabel}
+                {regime.routeLabel} · {regime.chainageLabel}
               </div>
               <div className="font-mono-tech text-[9px] text-text-tertiary sm:text-[10px]">3D FIELD INSPECTION — DEMO DATA</div>
             </div>
@@ -102,10 +125,11 @@ export function InspectionHUD({
               </div>
               <h1 className="font-display text-xl font-bold text-text-primary">3D Field Inspection</h1>
               <p className="mt-2 text-sm leading-relaxed text-text-tertiary">
-                Drive {segment.roadName} {segment.segmentLabel}, stop at a flagged defect, step out and inspect the
-                pavement — explode the layer stack, inspect material condition, then trigger AI analysis for the
-                predicted damage and repair recommendation.
+                Drive {(ROAD_LENGTH_M / 1000).toFixed(1)} km of {regime.label.toLowerCase()} corridor with{" "}
+                {defects.length} flagged failures on it. Stop at each one, step out and inspect the pavement — explode
+                the layer stack, inspect material condition, then run AI analysis for the predicted damage and repair.
               </p>
+              <p className="mt-2 text-xs text-text-tertiary">{regime.blurb}</p>
               <Button variant="primary" size="lg" className="mt-5 w-full" onClick={onEnterWorld}>
                 Enter 3D World <ArrowRight className="h-4 w-4" />
               </Button>
@@ -115,12 +139,21 @@ export function InspectionHUD({
         )}
 
         {(flow === "driving" || flow === "approaching") && (
-          <div className="pointer-events-none absolute left-4 top-4 sm:left-6 sm:top-20">
-            <div className="glass-panel rounded-lg border border-hairline px-3 py-2 text-[11px] text-text-tertiary">
-              <span className="font-mono-tech text-text-secondary">W/S</span> drive ·{" "}
-              <span className="font-mono-tech text-text-secondary">A/D</span> steer
+          <>
+            <div className="pointer-events-none absolute right-4 top-20 sm:right-6 sm:top-24">
+              <div className="glass-panel rounded-lg border border-hairline px-3 py-2 text-[11px] text-text-tertiary">
+                <span className="font-mono-tech text-text-secondary">W/S</span> drive ·{" "}
+                <span className="font-mono-tech text-text-secondary">A/D</span> steer
+              </div>
             </div>
-          </div>
+            <CorridorProgress
+              world={world}
+              defects={defects}
+              activeDefect={activeDefect}
+              defectIndex={defectIndex}
+              remaining={remaining}
+            />
+          </>
         )}
 
         {flow === "onfoot" && (
@@ -131,13 +164,16 @@ export function InspectionHUD({
           </div>
         )}
 
-        {flow === "approaching" && (
+        {flow === "approaching" && activeDefect && (
           <CenterPrompt>
-            <TriangleAlert className="h-5 w-5 text-critical" />
+            <TriangleAlert className="h-5 w-5" style={{ color: SEVERITY_HEX[activeDefect.severity] }} />
             <div>
-              <div className="text-sm font-semibold text-text-primary">Defect flagged ahead</div>
+              <div className="text-sm font-semibold text-text-primary">
+                {FAILURE_META[activeDefect.kind].label} ahead · {SEVERITY_LABEL[activeDefect.severity]}
+              </div>
               <div className="text-xs text-text-tertiary">
-                Predicted failure probability {segment.probabilityOfFailurePct}%. Stop and inspect the flagged section.
+                {FAILURE_META[activeDefect.kind].summary} Flagged at KM{" "}
+                {(activeDefect.chainageM / 1000).toFixed(2)}, {activeDefect.confidencePct}% confidence.
               </div>
             </div>
             <Button variant="danger" onClick={onStopAndInspect}>
@@ -276,13 +312,24 @@ export function InspectionHUD({
                   ))}
                 </div>
 
-                <div className="flex gap-2 pb-2">
-                  <Button variant="secondary" className="flex-1" onClick={onRestart}>
-                    Restart
-                  </Button>
-                  <Button variant="primary" className="flex-1" onClick={() => router.push("/condition-monitoring")}>
-                    Sync to Dashboard
-                  </Button>
+                <div className="space-y-2 pb-2">
+                  {!isLast ? (
+                    <Button variant="primary" className="w-full" onClick={onContinue}>
+                      Continue to next failure <span className="font-mono-tech text-[10px] opacity-70">[E]</span>
+                    </Button>
+                  ) : (
+                    <div className="rounded-lg border border-green/30 bg-green/[0.06] px-3 py-2.5 text-xs text-text-secondary">
+                      Last flagged failure on this corridor. Switch corridor or restart to survey another.
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <Button variant="secondary" className="flex-1" onClick={onRestart}>
+                      Restart
+                    </Button>
+                    <Button variant="primary" className="flex-1" onClick={() => router.push("/condition-monitoring")}>
+                      Sync to Dashboard
+                    </Button>
+                  </div>
                 </div>
               </>
             )}
@@ -293,9 +340,85 @@ export function InspectionHUD({
           <MaterialInspector
             index={selectedLayer}
             segment={segment}
+            defect={activeDefect}
             onClose={() => onSelectLayer(null)}
           />
         )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Chainage strip along the bottom of the drive.
+ *
+ * A 1.5 km corridor with eight failures on it needs a sense of place: where
+ * you are, how far the next one is, and how much of the survey is left. Polled
+ * from the world ref on an interval rather than driven from the render loop —
+ * the numbers only need to be current, not per-frame exact, and re-rendering
+ * the HUD at 60fps to move a progress bar would be wasteful.
+ */
+function CorridorProgress({
+  world,
+  defects,
+  activeDefect,
+  defectIndex,
+  remaining,
+}: {
+  world: React.RefObject<WorldRefState>;
+  defects: CorridorDefect[];
+  activeDefect: CorridorDefect | null;
+  defectIndex: number;
+  remaining: number;
+}) {
+  const [z, setZ] = useState(ROAD_START_Z);
+
+  useEffect(() => {
+    const id = setInterval(() => setZ(world.current.vehicle.z), 180);
+    return () => clearInterval(id);
+  }, [world]);
+
+  const travelled = Math.max(0, ROAD_START_Z - z);
+  const pct = Math.min(100, (travelled / ROAD_LENGTH_M) * 100);
+  const toNext = activeDefect ? Math.max(0, z - activeDefect.z) : 0;
+
+  return (
+    <div className="pointer-events-none absolute inset-x-0 bottom-0 px-4 pb-3 sm:px-6 sm:pb-4">
+      <div className="glass-panel mx-auto max-w-3xl rounded-xl border border-hairline px-4 py-3">
+        <div className="mb-2 flex items-end justify-between gap-3">
+          <div>
+            <div className="font-mono-tech text-[9px] uppercase tracking-[0.15em] text-text-tertiary">Chainage</div>
+            <div className="font-mono-tech text-sm font-bold text-text-primary">
+              KM {(travelled / 1000).toFixed(2)}
+              <span className="ml-1 text-[10px] font-normal text-text-tertiary">
+                / {(ROAD_LENGTH_M / 1000).toFixed(1)}
+              </span>
+            </div>
+          </div>
+          <div className="text-right">
+            <div className="font-mono-tech text-[9px] uppercase tracking-[0.15em] text-text-tertiary">
+              Failure {Math.min(defectIndex + 1, defects.length)} of {defects.length} · {remaining} left
+            </div>
+            <div className="font-mono-tech text-sm font-bold text-cyan">
+              {activeDefect ? (toNext > 0 ? `${Math.round(toNext)} m ahead` : "At the site") : "—"}
+            </div>
+          </div>
+        </div>
+
+        <div className="relative h-1.5 w-full rounded-full bg-white/[0.07]">
+          <div className="h-full rounded-full bg-cyan/70" style={{ width: `${pct}%` }} />
+          {defects.map((d) => {
+            const at = Math.min(100, Math.max(0, ((ROAD_START_Z - d.z) / ROAD_LENGTH_M) * 100));
+            return (
+              <span
+                key={d.id}
+                title={FAILURE_META[d.kind].label}
+                className="absolute top-1/2 h-2.5 w-[3px] -translate-y-1/2 rounded-sm"
+                style={{ left: `${at}%`, backgroundColor: SEVERITY_HEX[d.severity] }}
+              />
+            );
+          })}
+        </div>
       </div>
     </div>
   );
@@ -314,13 +437,15 @@ function CenterPrompt({ children }: { children: React.ReactNode }) {
 function MaterialInspector({
   index,
   segment,
+  defect,
   onClose,
 }: {
   index: number;
   segment: RoadSegment;
+  defect: CorridorDefect | null;
   onClose: () => void;
 }) {
-  const inspection = layerInspectionFor(index, segment);
+  const inspection = layerInspectionFor(index, segment, defect);
   return (
     <div className="pointer-events-auto absolute inset-x-4 bottom-4 sm:inset-x-auto sm:bottom-6 sm:left-6 sm:w-[380px]">
       <Card className="glass-panel border-cyan/30 p-4">

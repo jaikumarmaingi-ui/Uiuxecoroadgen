@@ -1,23 +1,34 @@
 import * as THREE from "three";
 import { fbm, ridgedNoise } from "@/lib/road-sense/noise";
+import {
+  CORRIDOR_REGIMES,
+  type CorridorRegime,
+  type CorridorTerrain,
+  type ProfileStop,
+  type RGB,
+} from "./regimes";
 
 /**
  * Terrain for the 3D field-inspection corridor.
  *
  * The road is a straight bench along the Z axis (the drive/walk physics in
  * `inspection-scene` depends on that), so the terrain is modelled the way a
- * real mountain highway is built: a flat graded bench, a cut face rising on
- * one side, a fill embankment dropping into a gorge on the other, and the
- * range beyond. Height is a lateral profile plus noise, which keeps the
- * corridor perfectly drivable while everything around it reads as landscape.
+ * real highway is built: a flat graded bench, a cut face rising on one side, a
+ * fill embankment falling on the other, and whatever the regime puts beyond
+ * them. Height is a lateral profile plus noise, which keeps the corridor
+ * perfectly drivable while everything around it reads as landscape.
+ *
+ * Everything that varies between landscapes lives in `regimes.ts`; this module
+ * only knows how to turn a regime into geometry.
  */
 
 export const TERRAIN_WIDTH = 460;
-export const TERRAIN_LENGTH = 620;
-export const TERRAIN_SEGMENTS_X = 210;
-export const TERRAIN_SEGMENTS_Z = 250;
+/** Corridor extent along Z. Generous, because the drive is a long one. */
+export const TERRAIN_Z_START = 220;
+export const TERRAIN_Z_END = -1480;
+export const TERRAIN_SEGMENTS_Z = 640;
 
-/** Half-width of the flat graded bench, in metres. Covers road + shoulders. */
+/** Half-width of the flat graded bench. Covers road + shoulders. */
 export const BENCH_HALF = 8.2;
 
 const SEED = 1207;
@@ -27,10 +38,8 @@ function smoothstep(edge0: number, edge1: number, x: number) {
   return t * t * (3 - 2 * t);
 }
 
-type Stop = readonly [distance: number, height: number];
-
 /** Piecewise profile with smoothstep blending between control points. */
-function profileEval(stops: readonly Stop[], d: number): number {
+function profileEval(stops: readonly ProfileStop[], d: number): number {
   if (d <= stops[0][0]) return stops[0][1];
   for (let i = 0; i < stops.length - 1; i++) {
     const [d0, h0] = stops[i];
@@ -40,59 +49,38 @@ function profileEval(stops: readonly Stop[], d: number): number {
   return stops[stops.length - 1][1];
 }
 
-// Cut face: bench, steep rock cut, then the flank of the mountain above it.
-const CLIFF_PROFILE: readonly Stop[] = [
-  [BENCH_HALF, 0],
-  [BENCH_HALF + 3, 3.2],
-  [26, 20],
-  [60, 44],
-  [120, 86],
-  [210, 128],
-];
-
-// Fill side: shoulder, embankment into the gorge, then the far wall of it.
-const GORGE_PROFILE: readonly Stop[] = [
-  [BENCH_HALF, 0],
-  [BENCH_HALF + 4, -6.5],
-  [30, -26],
-  [52, -33],
-  [88, -6],
-  [140, 52],
-  [230, 112],
-];
-
 /** Terrain height at a world-space point. Exactly 0 across the road bench. */
-export function corridorHeight(x: number, z: number): number {
+export function corridorHeight(regime: CorridorRegime, x: number, z: number): number {
   const lat = Math.abs(x);
-  const profile = x < 0 ? CLIFF_PROFILE : GORGE_PROFILE;
-  let h = profileEval(profile, lat);
+  let h = profileEval(x < 0 ? regime.cutProfile : regime.fillProfile, lat);
 
   // Relief only starts past the graded bench, and grows with distance so the
   // roadside stays calm while the skyline gets dramatic.
-  const nearAmp = smoothstep(BENCH_HALF + 1.5, 45, lat) * 11;
-  const farAmp = smoothstep(55, 190, lat) * 34;
+  const nearAmp = smoothstep(BENCH_HALF + 1.5, 45, lat) * regime.nearAmp;
+  const farAmp = smoothstep(55, 190, lat) * regime.farAmp;
+  const s = regime.detailScale;
 
   if (nearAmp > 0.01) {
     // Two scales: gullies and spurs down the cut face, then a finer break-up
     // so the slope has silhouette instead of reading as a smooth dune.
-    const detail = fbm(x * 0.03, z * 0.03, SEED, 4);
-    const rough = fbm(x * 0.11, z * 0.11, SEED + 5, 3);
+    const detail = fbm(x * 0.03 * s, z * 0.03 * s, SEED, 4);
+    const rough = fbm(x * 0.11 * s, z * 0.11 * s, SEED + 5, 3);
     h += detail * nearAmp + rough * nearAmp * 0.28;
   }
   if (farAmp > 0.01) {
     // Ridged noise gives sharp arêtes and cirques instead of rolling blobs.
-    const ridge = ridgedNoise(x * 0.0085, z * 0.0085, SEED + 3);
-    const rolling = fbm(x * 0.006, z * 0.006, SEED + 11, 3);
+    const ridge = ridgedNoise(x * 0.0085 * s, z * 0.0085 * s, SEED + 3);
+    const rolling = fbm(x * 0.006 * s, z * 0.006 * s, SEED + 11, 3);
     h += (ridge * 0.72 + (rolling * 0.5 + 0.5) * 0.28 - 0.34) * farAmp;
   }
 
-  // A range closing the head of the valley. It rises everywhere, but more
-  // slowly on the corridor line, so the road runs into distant rock rather
+  // A range closing the far end of the corridor. It rises everywhere, but more
+  // slowly on the corridor line, so the road runs into distant ground rather
   // than into a blown-out patch of sky at the vanishing point.
-  const ahead = smoothstep(250, 400, -z) * (0.3 + 0.7 * smoothstep(14, 62, lat));
+  const ahead = smoothstep(1180, 1420, -z) * (0.3 + 0.7 * smoothstep(14, 62, lat));
   if (ahead > 0.01) {
-    const ridge = ridgedNoise(x * 0.009, z * 0.009, SEED + 23);
-    h += ahead * (40 + ridge * 68);
+    const ridge = ridgedNoise(x * 0.009 * s, z * 0.009 * s, SEED + 23);
+    h += ahead * (regime.aheadHeight + ridge * regime.aheadHeight * 1.7);
   }
 
   return h;
@@ -110,6 +98,15 @@ export interface PitCut {
   half: number;
 }
 
+function dedupe(values: number[]): number[] {
+  values.sort((a, b) => a - b);
+  const out: number[] = [];
+  for (const v of values) {
+    if (out.length === 0 || v - out[out.length - 1] > 1e-4) out.push(v);
+  }
+  return out;
+}
+
 /**
  * Grid lines for one axis: an even division, with the cut boundaries inserted
  * as exact extra lines.
@@ -123,12 +120,35 @@ function gridStations(min: number, max: number, divisions: number, cuts: number[
   const out: number[] = [];
   for (let i = 0; i <= divisions; i++) out.push(min + ((max - min) * i) / divisions);
   for (const c of cuts) if (c > min && c < max) out.push(c);
-  out.sort((a, b) => a - b);
-  const deduped: number[] = [];
-  for (const v of out) {
-    if (deduped.length === 0 || v - deduped[deduped.length - 1] > 1e-4) deduped.push(v);
+  return dedupe(out);
+}
+
+/**
+ * Lateral stations, graded by distance from the corridor.
+ *
+ * The corridor is now well over a kilometre long, so a uniform lateral grid
+ * fine enough for the roadside would put the mesh into six figures of vertices
+ * for ground the driver only ever sees as a distant skyline. Spacing the
+ * stations out with distance keeps detail where the eye is and costs a
+ * fraction of the vertices; the slope and colour passes already work from real
+ * coordinate deltas, so non-uniform spacing needs no special handling there.
+ */
+function lateralStations(halfWidth: number, cuts: number[]): number[] {
+  const bands: [from: number, to: number, step: number][] = [
+    [0, 26, 2],
+    [26, 60, 4],
+    [60, 120, 9],
+    [120, halfWidth, 18],
+  ];
+  const out: number[] = [0];
+  for (const [from, to, step] of bands) {
+    for (let d = from + step; d <= to + 1e-6; d += step) {
+      out.push(d, -d);
+    }
   }
-  return deduped;
+  out.push(halfWidth, -halfWidth);
+  for (const c of cuts) if (Math.abs(c) < halfWidth) out.push(c);
+  return dedupe(out);
 }
 
 function cutsFor(pit: PitCut | undefined, axis: "x" | "z"): number[] {
@@ -151,15 +171,7 @@ export interface TerrainBuild {
   maxY: number;
 }
 
-// Kept deliberately cool and dark: a warm 2.5-intensity sun plus filmic tone
-// mapping lifts these a long way, and warm mid-tones come out as sand dune.
-const ROCK_DARK: [number, number, number] = [0.19, 0.19, 0.2];
-const ROCK_LIGHT: [number, number, number] = [0.4, 0.39, 0.39];
-const SOIL: [number, number, number] = [0.26, 0.23, 0.19];
-const SCREE: [number, number, number] = [0.34, 0.33, 0.32];
-const SNOW: [number, number, number] = [0.82, 0.85, 0.9];
-
-function mix3(a: [number, number, number], b: [number, number, number], t: number): [number, number, number] {
+function mix3(a: RGB, b: RGB, t: number): RGB {
   const k = t < 0 ? 0 : t > 1 ? 1 : t;
   return [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k];
 }
@@ -172,14 +184,15 @@ function mix3(a: [number, number, number], b: [number, number, number], t: numbe
  * darken, ridges stay bright. It costs one extra pass over the heightfield and
  * does most of the work a screen-space AO pass would, for free, at every angle.
  */
-export function buildCorridorTerrain(opts: { pit?: PitCut } = {}): TerrainBuild {
+export function buildCorridorTerrain(
+  regime: CorridorRegime,
+  opts: { pit?: PitCut } = {},
+): TerrainBuild {
   const { pit } = opts;
-  // Centre the mesh a long way down-corridor so there is landscape ahead of
-  // the driver rather than a visible edge.
-  const originZ = -TERRAIN_LENGTH / 2 + 140;
+  const { palette } = regime;
 
-  const xs = gridStations(-TERRAIN_WIDTH / 2, TERRAIN_WIDTH / 2, TERRAIN_SEGMENTS_X, cutsFor(pit, "x"));
-  const zs = gridStations(originZ, originZ + TERRAIN_LENGTH, TERRAIN_SEGMENTS_Z, cutsFor(pit, "z"));
+  const xs = lateralStations(TERRAIN_WIDTH / 2, cutsFor(pit, "x"));
+  const zs = gridStations(TERRAIN_Z_END, TERRAIN_Z_START, TERRAIN_SEGMENTS_Z, cutsFor(pit, "z"));
   const vx = xs.length;
   const vz = zs.length;
   const count = vx * vz;
@@ -197,7 +210,7 @@ export function buildCorridorTerrain(opts: { pit?: PitCut } = {}): TerrainBuild 
       const idx = j * vx + i;
       const x = xs[i];
       const z = zs[j];
-      const h = corridorHeight(x, z);
+      const h = corridorHeight(regime, x, z);
       heights[idx] = h;
       if (h < minY) minY = h;
       if (h > maxY) maxY = h;
@@ -213,18 +226,22 @@ export function buildCorridorTerrain(opts: { pit?: PitCut } = {}): TerrainBuild 
   const sampleH = (i: number, j: number) =>
     heights[Math.min(vz - 1, Math.max(0, j)) * vx + Math.min(vx - 1, Math.max(0, i))];
 
+  const [snowLo, snowHi] = regime.snowline;
+  const [rockLo, rockHi] = regime.rockSlope;
+
   for (let j = 0; j < vz; j++) {
     for (let i = 0; i < vx; i++) {
       const idx = j * vx + i;
       const h = heights[idx];
       const x = positions[idx * 3];
+      const z = positions[idx * 3 + 2];
 
       const hL = sampleH(i - 1, j);
       const hR = sampleH(i + 1, j);
       const hD = sampleH(i, j - 1);
       const hU = sampleH(i, j + 1);
-      // Real spacing, since inserting the pit boundaries makes the grid
-      // slightly non-uniform around the opening.
+      // Real spacing: the lateral grid is graded and the pit boundaries are
+      // inserted, so neither axis is evenly spaced.
       const dx = xs[Math.min(vx - 1, i + 1)] - xs[Math.max(0, i - 1)] || 1;
       const dz = zs[Math.min(vz - 1, j + 1)] - zs[Math.max(0, j - 1)] || 1;
       // Gradient magnitude. Averaging the two axes (rather than taking the
@@ -244,18 +261,31 @@ export function buildCorridorTerrain(opts: { pit?: PitCut } = {}): TerrainBuild 
       const ao = 0.72 + (openness * 0.5 + 0.5) * 0.4;
 
       // Rock on steep ground, soil and scree where it can settle.
-      let color = mix3(SOIL, SCREE, smoothstep(0.1, 0.5, slope));
-      color = mix3(color, mix3(ROCK_DARK, ROCK_LIGHT, Math.min(1, slope * 0.9)), smoothstep(0.28, 1.0, slope));
+      let color = mix3(palette.soil, palette.scree, smoothstep(0.1, 0.5, slope));
+      color = mix3(
+        color,
+        mix3(palette.rockDark, palette.rockLight, Math.min(1, slope * 0.9)),
+        smoothstep(rockLo, rockHi, slope),
+      );
+
+      // Vegetation takes hold on gentle ground, in patches rather than evenly.
+      if (palette.verdure) {
+        const patch = fbm(x * 0.012, z * 0.012, SEED + 31, 3) * 0.5 + 0.5;
+        const gentle = 1 - smoothstep(0.3, 0.95, slope);
+        color = mix3(color, palette.verdure, gentle * (0.35 + patch * 0.5));
+      }
 
       // Snowline, only where snow could actually lie.
-      const snow = smoothstep(58, 96, h) * (1 - smoothstep(0.9, 1.9, slope));
-      color = mix3(color, SNOW, snow * 0.92);
+      if (palette.snow) {
+        const snow = smoothstep(snowLo, snowHi, h) * (1 - smoothstep(0.9, 1.9, slope));
+        color = mix3(color, palette.snow, snow * 0.92);
+      }
 
-      // The gorge floor is in permanent shade and holds moisture.
+      // Low ground holds moisture and sits in shade.
       if (h < -14) color = mix3(color, [0.12, 0.13, 0.13], smoothstep(-14, -32, h) * 0.55);
 
       // Break up flat gradient banding.
-      const jitter = fbm(x * 0.3, positions[idx * 3 + 2] * 0.3, SEED + 9, 2) * 0.035;
+      const jitter = fbm(x * 0.3, z * 0.3, SEED + 9, 2) * 0.035;
 
       colors[idx * 3] = Math.max(0, Math.min(1, (color[0] + jitter) * ao));
       colors[idx * 3 + 1] = Math.max(0, Math.min(1, (color[1] + jitter) * ao));
@@ -291,10 +321,23 @@ export function buildCorridorTerrain(opts: { pit?: PitCut } = {}): TerrainBuild 
 export const ROAD_WIDTH_M = 7.2;
 /** Crown height at the centreline — real roads shed water off a camber. */
 export const ROAD_CAMBER = 0.075;
-export const ROAD_START_Z = 120;
-export const ROAD_END_Z = -260;
+export const ROAD_START_Z = 150;
+export const ROAD_END_Z = -1400;
 /** Metres of road covered by one repeat of the carriageway texture. */
 export const ROAD_TEXTURE_LENGTH = 18;
+
+/**
+ * Chainage scale.
+ *
+ * The scene is built at roughly 1 world unit to the metre near the road — the
+ * carriageway is 7.2 units wide for a 7.2 m carriageway — so chainage along
+ * the corridor can be reported honestly in metres at 1:1. (ROAD//SENSE's
+ * terrain is a stylised miniature and cannot; this one can.)
+ */
+export const CHAINAGE_M_PER_UNIT = 1;
+
+/** Total drivable length, in metres. */
+export const ROAD_LENGTH_M = (ROAD_START_Z - ROAD_END_Z) * CHAINAGE_M_PER_UNIT;
 
 /** Height of the cambered carriageway at a given offset from the centreline. */
 export function roadSurfaceY(x: number): number {
@@ -311,7 +354,10 @@ export function buildRoadGeometry(opts: { pit?: PitCut } = {}): THREE.BufferGeom
   const half = ROAD_WIDTH_M / 2;
 
   const xs = gridStations(-half, half, 28, cutsFor(pit, "x"));
-  const zs = gridStations(ROAD_END_Z, ROAD_START_Z, 260, cutsFor(pit, "z"));
+  // One station roughly every 1.5 m: enough for the camber and the normal map
+  // without carrying a vertex budget the length no longer justifies.
+  const alongDivisions = Math.round((ROAD_START_Z - ROAD_END_Z) / 1.5);
+  const zs = gridStations(ROAD_END_Z, ROAD_START_Z, alongDivisions, cutsFor(pit, "z"));
   const vx = xs.length;
   const vz = zs.length;
   const count = vx * vz;
@@ -327,11 +373,8 @@ export function buildRoadGeometry(opts: { pit?: PitCut } = {}): THREE.BufferGeom
     for (let i = 0; i < vx; i++) {
       const idx = j * vx + i;
       const x = xs[i];
-      // Parabolic crown, plus a slight settle in the wheel paths.
-      const nx = x / half;
-      const camber = ROAD_CAMBER * (1 - nx * nx);
       positions[idx * 3] = x;
-      positions[idx * 3 + 1] = 0.05 + camber;
+      positions[idx * 3 + 1] = roadSurfaceY(x);
       positions[idx * 3 + 2] = z;
       uvs[idx * 2] = (x + half) / ROAD_WIDTH_M;
       uvs[idx * 2 + 1] = z / ROAD_TEXTURE_LENGTH;
@@ -358,3 +401,6 @@ export function buildRoadGeometry(opts: { pit?: PitCut } = {}): THREE.BufferGeom
   geometry.computeVertexNormals();
   return geometry;
 }
+
+export { CORRIDOR_REGIMES };
+export type { CorridorRegime, CorridorTerrain };
