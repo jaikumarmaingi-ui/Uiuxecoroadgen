@@ -59,8 +59,19 @@ const BASE_FOV = 52;
 
 /** The opening cut through the carriageway and terrain for the trial pit. */
 const PIT_CUT: PitCut = { x: PIT_POSITION[0], z: PIT_POSITION[2], half: PIT_HALF };
-/** Carriageway surface height at the pit, which everything there sits on. */
-const PIT_SURFACE_Y = roadSurfaceY(PIT_POSITION[0]);
+/**
+ * Height the extracted core is seated at.
+ *
+ * Taken from the LOW side of the cut rather than its centre: the core's top is
+ * flat but the carriageway is cambered across it, so seating it at the mean
+ * leaves it standing proud of the road on the outer edge. Seating it at the
+ * lowest point of the rim means it can only ever sit at or below the
+ * surrounding surface, which is how a cut block actually sits in its hole.
+ */
+const PIT_SURFACE_Y = Math.min(
+  roadSurfaceY(PIT_POSITION[0] - PIT_HALF),
+  roadSurfaceY(PIT_POSITION[0] + PIT_HALF),
+);
 const PIT_ORIGIN: [number, number, number] = [PIT_POSITION[0], PIT_SURFACE_Y, PIT_POSITION[2]];
 
 export function InspectionScene({

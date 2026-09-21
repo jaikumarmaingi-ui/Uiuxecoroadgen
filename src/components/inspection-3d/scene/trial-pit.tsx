@@ -133,6 +133,14 @@ export function TrialPit({ pit }: { pit: PitCut }) {
             <meshStandardMaterial color="#090c0f" roughness={0.7} side={THREE.DoubleSide} />
           </mesh>
         ))}
+
+        {/* Survey marker on the rim of the cut. This is the product's cyan
+            accent, kept with the opening rather than on the core, so it stays
+            put when the core lifts out. */}
+        <mesh position={[0, rimY + 0.002, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <ringGeometry args={[pit.half + 0.1, pit.half + 0.16, 4, 1, Math.PI / 4]} />
+          <meshBasicMaterial color="#35e0d0" transparent opacity={0.5} side={THREE.DoubleSide} depthWrite={false} />
+        </mesh>
       </group>
 
       {/* Spoil heap from the excavation. */}
