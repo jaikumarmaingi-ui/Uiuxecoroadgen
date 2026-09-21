@@ -18,6 +18,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import { PredictionChart } from "@/components/charts/prediction-chart";
 import { FeatureImportance } from "@/components/charts/feature-importance";
 import { TreatmentCard } from "./treatment-card";
@@ -124,6 +125,19 @@ export function InspectionHUD({
   const treatments = match?.options ?? [];
 
   const showSidePanel = flow === "inspecting" || flow === "exploded" || flow === "analyzing" || flow === "results";
+  /**
+   * A centre prompt and the side panel are both on screen during the exploded
+   * step, and they collide below roughly 860px of width: the panel is a fixed
+   * 360px on the right, the prompt is a centred 448px, and there is not room
+   * for both. The prompt lost — its button rendered *under* the panel, so the
+   * click that should trigger the analysis hit the panel instead.
+   *
+   * Below xl the panel stops short of the bottom strip and the two stack;
+   * from xl there is room to sit side by side, as before.
+   */
+  const promptVisible =
+    flow === "approaching" || flow === "parked" || flow === "onfoot" || flow === "exploded";
+  const clearPrompt = promptVisible && showSidePanel;
 
   return (
     <div className="pointer-events-none absolute inset-0 flex flex-col">
@@ -253,7 +267,7 @@ export function InspectionHUD({
         )}
 
         {flow === "analyzing" && (
-          <div className="pointer-events-none absolute inset-x-0 top-1/2 flex -translate-y-1/2 justify-center">
+          <div className="pointer-events-none absolute inset-x-0 top-1/2 flex -translate-y-1/2 justify-center px-4 xl:pr-0 pr-[min(92vw,360px)]">
             <div className="glass-panel flex items-center gap-3 rounded-xl border border-cyan/30 px-5 py-3.5">
               <Loader2 className="h-5 w-5 animate-spin text-cyan" />
               <div>
@@ -265,7 +279,12 @@ export function InspectionHUD({
         )}
 
         {showSidePanel && (
-          <div className="pointer-events-auto absolute bottom-4 right-4 top-20 w-[min(92vw,360px)] space-y-3 overflow-y-auto no-scrollbar sm:bottom-6 sm:right-6 sm:top-24">
+          <div
+            className={cn(
+              "pointer-events-auto absolute right-4 top-20 w-[min(92vw,360px)] space-y-3 overflow-y-auto no-scrollbar sm:right-6 sm:top-24",
+              clearPrompt ? "bottom-[124px] sm:bottom-[132px] xl:bottom-6" : "bottom-4 sm:bottom-6",
+            )}
+          >
             {flow !== "results" && (
               <Card className="glass-panel p-4">
                 <div className="mb-3 flex items-center justify-between">
