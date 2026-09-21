@@ -54,7 +54,6 @@ export function Atmosphere() {
         shadow-mapSize={[2048, 2048]}
         shadow-bias={-0.0004}
         shadow-normalBias={0.025}
-        shadow-radius={3}
       >
         <orthographicCamera attach="shadow-camera" args={[-60, 60, 60, -60, 1, 380]} />
       </directionalLight>

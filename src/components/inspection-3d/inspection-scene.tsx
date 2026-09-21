@@ -22,7 +22,7 @@ import { PavementCrossSection } from "./pavement-cross-section";
 import { Atmosphere } from "./scene/atmosphere";
 import { CorridorEnvironment } from "./scene/corridor-environment";
 import { InspectionVehicle, VehicleDust } from "./scene/vehicle";
-import { BENCH_HALF, ROAD_CAMBER, ROAD_WIDTH_M } from "@/lib/inspection-3d/terrain";
+import { BENCH_HALF, ROAD_WIDTH_M, roadSurfaceY, type PitCut } from "@/lib/inspection-3d/terrain";
 import { LAYER_EXPLODE_RISE } from "./pavement-layers";
 import {
   APPROACH_RANGE,
@@ -30,6 +30,7 @@ import {
   PARK_HEADING,
   PARK_X,
   PARK_Z,
+  PIT_HALF,
   PIT_POSITION,
   ROAD_HALF_DRIVABLE,
   START_Z,
@@ -56,11 +57,11 @@ const PIT_TOP_Y = 0.3;
 
 const BASE_FOV = 52;
 
-/** Height of the cambered carriageway at a given offset from the centreline. */
-function roadSurfaceY(x: number): number {
-  const nx = THREE.MathUtils.clamp(x / (ROAD_WIDTH_M / 2), -1, 1);
-  return 0.05 + ROAD_CAMBER * (1 - nx * nx);
-}
+/** The opening cut through the carriageway and terrain for the trial pit. */
+const PIT_CUT: PitCut = { x: PIT_POSITION[0], z: PIT_POSITION[2], half: PIT_HALF };
+/** Carriageway surface height at the pit, which everything there sits on. */
+const PIT_SURFACE_Y = roadSurfaceY(PIT_POSITION[0]);
+const PIT_ORIGIN: [number, number, number] = [PIT_POSITION[0], PIT_SURFACE_Y, PIT_POSITION[2]];
 
 export function InspectionScene({
   flow,
@@ -100,7 +101,8 @@ export function InspectionScene({
   const exploded = flow === "exploded" || flow === "analyzing" || flow === "results";
   const interactiveLayers = flow === "exploded" || flow === "results";
   const orbitEnabled = flow === "onfoot" || flow === "inspecting" || flow === "exploded" || flow === "results";
-  const riskColor = RISK_META[segment.riskLevel].color;
+  // Resolved hex, not the CSS variable: three.js cannot parse `var(...)`.
+  const riskColor = RISK_META[segment.riskLevel].hex;
   // Scaled well below 1: this drives hairline cracking density in the road
   // texture, and even a critical segment is not a shattered carriageway.
   const distress = Math.min(0.5, Math.max(0.15, segment.distress.cracking / 200));
@@ -272,7 +274,7 @@ export function InspectionScene({
     <>
       <Atmosphere />
 
-      <CorridorEnvironment distress={distress} />
+      <CorridorEnvironment distress={distress} pit={PIT_CUT} />
       <CorridorSign segment={segment} riskColor={riskColor} />
 
       <DefectMarker
@@ -293,7 +295,7 @@ export function InspectionScene({
       {pitActive && (
         <PavementCrossSection
           segment={segment}
-          position={PIT_POSITION}
+          position={PIT_ORIGIN}
           exploded={exploded}
           interactive={interactiveLayers}
           selectedLayer={selectedLayer}
@@ -391,7 +393,7 @@ function DefectMarker({
       const mesh = ref.current;
       if (!mesh) continue;
       const cycle = ((t + phase) % 2.2) / 2.2;
-      const s = 0.35 + cycle * 0.9;
+      const s = 1 + cycle * 0.5;
       mesh.scale.set(s, s, s);
       const mat = mesh.material as THREE.MeshBasicMaterial;
       mat.opacity = 0.5 * (1 - cycle);
@@ -400,24 +402,22 @@ function DefectMarker({
 
   if (!visible) return null;
   return (
-    <group position={[PIT_POSITION[0], 0.075, DEFECT_Z]}>
+    // Rings the open cut rather than covering it: the pit is a real hole in
+    // the carriageway, so a filled disc here would read as a lid on it.
+    <group position={[PIT_POSITION[0], PIT_SURFACE_Y + 0.006, DEFECT_Z]}>
       <mesh rotation={[-Math.PI / 2, 0, 0]}>
-        <circleGeometry args={[1.05, 32]} />
-        <meshStandardMaterial color="#0b0d10" roughness={1} />
-      </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[0.96, 1, 48]} />
+        <ringGeometry args={[2.02, 2.1, 64]} />
         <meshBasicMaterial color={color} transparent opacity={0.7} side={THREE.DoubleSide} depthWrite={false} />
       </mesh>
       <mesh ref={ping1} rotation={[-Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[0.94, 0.98, 48]} />
+        <ringGeometry args={[1.98, 2.06, 64]} />
         <meshBasicMaterial color={color} transparent opacity={0} side={THREE.DoubleSide} depthWrite={false} />
       </mesh>
       <mesh ref={ping2} rotation={[-Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[0.94, 0.98, 48]} />
+        <ringGeometry args={[1.98, 2.06, 64]} />
         <meshBasicMaterial color={color} transparent opacity={0} side={THREE.DoubleSide} depthWrite={false} />
       </mesh>
-      <Html position={[0, 1.35, 0]} center distanceFactor={12}>
+      <Html position={[0, 1.6, 0]} center distanceFactor={12}>
         <div
           className="pointer-events-none whitespace-nowrap rounded border px-2 py-1 font-mono-tech text-[10px] font-semibold uppercase tracking-wider shadow-lg"
           style={{ borderColor: `${color}55`, color, background: "rgba(8,12,16,0.88)" }}

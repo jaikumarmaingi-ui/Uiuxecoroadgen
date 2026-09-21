@@ -52,9 +52,11 @@ export function PavementCrossSection({
       const s = THREE.MathUtils.clamp(growth.current, 0.001, 1);
       groupScaleRef.current.scale.setScalar(s);
       // Lift out of the pit as it explodes, back into it as it collapses.
+      // At rest the surface course is flush with the carriageway it was cut
+      // from — half a layer down, since the layers are centred on their own y.
       groupScaleRef.current.position.y = THREE.MathUtils.damp(
         groupScaleRef.current.position.y,
-        exploded ? LAYER_EXPLODE_RISE : 0,
+        exploded ? LAYER_EXPLODE_RISE : -LAYER_THICKNESS / 2,
         4.5,
         delta,
       );

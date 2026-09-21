@@ -98,6 +98,53 @@ export function corridorHeight(x: number, z: number): number {
   return h;
 }
 
+/**
+ * A rectangular opening cut through both the carriageway and the terrain, so
+ * the trial pit at a flagged defect is a real hole rather than a dark decal
+ * painted on an unbroken surface.
+ */
+export interface PitCut {
+  x: number;
+  z: number;
+  /** Half the side length of the (square) opening. */
+  half: number;
+}
+
+/**
+ * Grid lines for one axis: an even division, with the cut boundaries inserted
+ * as exact extra lines.
+ *
+ * Snapping the hole to whatever the nearest even grid line happens to be would
+ * leave its edges up to a cell out of place — metres, on the terrain. Adding
+ * the boundaries as their own stations makes the opening land exactly where
+ * the pit is, at any grid resolution.
+ */
+function gridStations(min: number, max: number, divisions: number, cuts: number[]): number[] {
+  const out: number[] = [];
+  for (let i = 0; i <= divisions; i++) out.push(min + ((max - min) * i) / divisions);
+  for (const c of cuts) if (c > min && c < max) out.push(c);
+  out.sort((a, b) => a - b);
+  const deduped: number[] = [];
+  for (const v of out) {
+    if (deduped.length === 0 || v - deduped[deduped.length - 1] > 1e-4) deduped.push(v);
+  }
+  return deduped;
+}
+
+function cutsFor(pit: PitCut | undefined, axis: "x" | "z"): number[] {
+  if (!pit) return [];
+  const c = axis === "x" ? pit.x : pit.z;
+  return [c - pit.half, c + pit.half];
+}
+
+/** True when the centre of a cell falls inside the opening. */
+function cellInPit(pit: PitCut | undefined, x0: number, x1: number, z0: number, z1: number): boolean {
+  if (!pit) return false;
+  const cx = (x0 + x1) / 2;
+  const cz = (z0 + z1) / 2;
+  return Math.abs(cx - pit.x) < pit.half && Math.abs(cz - pit.z) < pit.half;
+}
+
 export interface TerrainBuild {
   geometry: THREE.BufferGeometry;
   minY: number;
@@ -125,11 +172,16 @@ function mix3(a: [number, number, number], b: [number, number, number], t: numbe
  * darken, ridges stay bright. It costs one extra pass over the heightfield and
  * does most of the work a screen-space AO pass would, for free, at every angle.
  */
-export function buildCorridorTerrain(): TerrainBuild {
-  const sx = TERRAIN_SEGMENTS_X;
-  const sz = TERRAIN_SEGMENTS_Z;
-  const vx = sx + 1;
-  const vz = sz + 1;
+export function buildCorridorTerrain(opts: { pit?: PitCut } = {}): TerrainBuild {
+  const { pit } = opts;
+  // Centre the mesh a long way down-corridor so there is landscape ahead of
+  // the driver rather than a visible edge.
+  const originZ = -TERRAIN_LENGTH / 2 + 140;
+
+  const xs = gridStations(-TERRAIN_WIDTH / 2, TERRAIN_WIDTH / 2, TERRAIN_SEGMENTS_X, cutsFor(pit, "x"));
+  const zs = gridStations(originZ, originZ + TERRAIN_LENGTH, TERRAIN_SEGMENTS_Z, cutsFor(pit, "z"));
+  const vx = xs.length;
+  const vz = zs.length;
   const count = vx * vz;
 
   const positions = new Float32Array(count * 3);
@@ -137,20 +189,14 @@ export function buildCorridorTerrain(): TerrainBuild {
   const uvs = new Float32Array(count * 2);
   const heights = new Float32Array(count);
 
-  const cellX = TERRAIN_WIDTH / sx;
-  const cellZ = TERRAIN_LENGTH / sz;
-  // Centre the mesh a long way down-corridor so there is landscape ahead of
-  // the driver rather than a visible edge.
-  const originZ = -TERRAIN_LENGTH / 2 + 140;
-
   let minY = Infinity;
   let maxY = -Infinity;
 
   for (let j = 0; j < vz; j++) {
     for (let i = 0; i < vx; i++) {
       const idx = j * vx + i;
-      const x = -TERRAIN_WIDTH / 2 + i * cellX;
-      const z = originZ + j * cellZ;
+      const x = xs[i];
+      const z = zs[j];
       const h = corridorHeight(x, z);
       heights[idx] = h;
       if (h < minY) minY = h;
@@ -177,10 +223,14 @@ export function buildCorridorTerrain(): TerrainBuild {
       const hR = sampleH(i + 1, j);
       const hD = sampleH(i, j - 1);
       const hU = sampleH(i, j + 1);
+      // Real spacing, since inserting the pit boundaries makes the grid
+      // slightly non-uniform around the opening.
+      const dx = xs[Math.min(vx - 1, i + 1)] - xs[Math.max(0, i - 1)] || 1;
+      const dz = zs[Math.min(vz - 1, j + 1)] - zs[Math.max(0, j - 1)] || 1;
       // Gradient magnitude. Averaging the two axes (rather than taking the
       // hypotenuse) halves the reading on a slope that only falls one way,
       // which leaves steep rock faces classified as gentle soil.
-      const slope = Math.hypot((hR - hL) / (2 * cellX), (hU - hD) / (2 * cellZ));
+      const slope = Math.hypot((hR - hL) / dx, (hU - hD) / dz);
 
       // Wide-radius openness term -> baked ambient occlusion.
       let around = 0;
@@ -213,22 +263,18 @@ export function buildCorridorTerrain(): TerrainBuild {
     }
   }
 
-  const indices = new Uint32Array(sx * sz * 6);
-  let k = 0;
-  for (let j = 0; j < sz; j++) {
-    for (let i = 0; i < sx; i++) {
+  const tris: number[] = [];
+  for (let j = 0; j < vz - 1; j++) {
+    for (let i = 0; i < vx - 1; i++) {
+      if (cellInPit(pit, xs[i], xs[i + 1], zs[j], zs[j + 1])) continue;
       const a = j * vx + i;
       const b = j * vx + i + 1;
       const c = (j + 1) * vx + i;
       const d = (j + 1) * vx + i + 1;
-      indices[k++] = a;
-      indices[k++] = c;
-      indices[k++] = b;
-      indices[k++] = b;
-      indices[k++] = c;
-      indices[k++] = d;
+      tris.push(a, c, b, b, c, d);
     }
   }
+  const indices = Uint32Array.from(tris);
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
@@ -250,58 +296,60 @@ export const ROAD_END_Z = -260;
 /** Metres of road covered by one repeat of the carriageway texture. */
 export const ROAD_TEXTURE_LENGTH = 18;
 
+/** Height of the cambered carriageway at a given offset from the centreline. */
+export function roadSurfaceY(x: number): number {
+  const nx = Math.max(-1, Math.min(1, x / (ROAD_WIDTH_M / 2)));
+  return 0.05 + ROAD_CAMBER * (1 - nx * nx);
+}
+
 /**
  * Carriageway ribbon: a cambered strip with dense enough tessellation along
  * its length that the surface normal map and the camber both read.
  */
-export function buildRoadGeometry(): THREE.BufferGeometry {
-  const across = 28;
-  const along = 260;
-  const vx = across + 1;
-  const vz = along + 1;
+export function buildRoadGeometry(opts: { pit?: PitCut } = {}): THREE.BufferGeometry {
+  const { pit } = opts;
+  const half = ROAD_WIDTH_M / 2;
+
+  const xs = gridStations(-half, half, 28, cutsFor(pit, "x"));
+  const zs = gridStations(ROAD_END_Z, ROAD_START_Z, 260, cutsFor(pit, "z"));
+  const vx = xs.length;
+  const vz = zs.length;
   const count = vx * vz;
   const positions = new Float32Array(count * 3);
   const uvs = new Float32Array(count * 2);
-  const half = ROAD_WIDTH_M / 2;
-  const length = ROAD_START_Z - ROAD_END_Z;
 
   // z must INCREASE with j, matching the terrain builder: the shared index
   // winding below is only front-facing for that handedness, and getting it
   // backwards makes the whole ribbon face downwards and vanish to backface
   // culling.
   for (let j = 0; j < vz; j++) {
-    const z = ROAD_END_Z + (j / along) * length;
+    const z = zs[j];
     for (let i = 0; i < vx; i++) {
       const idx = j * vx + i;
-      const t = i / across;
-      const x = -half + t * ROAD_WIDTH_M;
+      const x = xs[i];
       // Parabolic crown, plus a slight settle in the wheel paths.
       const nx = x / half;
       const camber = ROAD_CAMBER * (1 - nx * nx);
       positions[idx * 3] = x;
       positions[idx * 3 + 1] = 0.05 + camber;
       positions[idx * 3 + 2] = z;
-      uvs[idx * 2] = t;
+      uvs[idx * 2] = (x + half) / ROAD_WIDTH_M;
       uvs[idx * 2 + 1] = z / ROAD_TEXTURE_LENGTH;
     }
   }
 
-  const indices = new Uint32Array(across * along * 6);
-  let k = 0;
-  for (let j = 0; j < along; j++) {
-    for (let i = 0; i < across; i++) {
+  const tris: number[] = [];
+  for (let j = 0; j < vz - 1; j++) {
+    for (let i = 0; i < vx - 1; i++) {
+      if (cellInPit(pit, xs[i], xs[i + 1], zs[j], zs[j + 1])) continue;
       const a = j * vx + i;
       const b = j * vx + i + 1;
       const c = (j + 1) * vx + i;
       const d = (j + 1) * vx + i + 1;
-      indices[k++] = a;
-      indices[k++] = c;
-      indices[k++] = b;
-      indices[k++] = b;
-      indices[k++] = c;
-      indices[k++] = d;
+      tris.push(a, c, b, b, c, d);
     }
   }
+  const indices = Uint32Array.from(tris);
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));

@@ -76,7 +76,9 @@ export function InspectionExperience() {
   return (
     <div className="relative h-dvh w-dvw overflow-hidden bg-base">
       <Canvas
-        shadows="soft"
+        // Plain PCF: this three build has removed PCFSoftShadowMap, and
+        // asking for "soft" just logs a warning and falls back to this anyway.
+        shadows
         camera={{ position: [0, 8, START_CAMERA_Z], fov: 52, near: 0.1, far: 900 }}
         dpr={[1, 1.5]}
         gl={{
