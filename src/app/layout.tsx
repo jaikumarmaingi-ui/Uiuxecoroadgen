@@ -22,9 +22,9 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ECOROADGEN 1.0 — Predictive Road Health Intelligence",
+  title: "ROAD//SENSE — AI Road & Terrain Intelligence",
   description:
-    "AI-Powered Predictive Road Health & Sustainable Repair System for Strategic Defence Roads.",
+    "AI-powered 3D road and terrain intelligence platform, with EcoRoadGen predictive road health & sustainable repair intelligence built in.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

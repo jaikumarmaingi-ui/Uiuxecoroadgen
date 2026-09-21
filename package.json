@@ -20,6 +20,7 @@
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "recharts": "^3.10.1",
+    "simplex-noise": "^4.0.3",
     "tailwind-merge": "^3.6.0",
     "three": "^0.186.0"
   },
