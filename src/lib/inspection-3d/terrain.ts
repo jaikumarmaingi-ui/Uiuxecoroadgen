@@ -87,6 +87,63 @@ export function corridorHeight(regime: CorridorRegime, x: number, z: number): nu
 }
 
 /**
+ * Height of the rendered terrain SURFACE at a point, as opposed to the
+ * analytic height field.
+ *
+ * The mesh is a piecewise-linear approximation of `corridorHeight`, and on a
+ * convex profile — the knee where a cut face turns up out of the bench — the
+ * flat facet between two stations sits *below* the curve it approximates. A
+ * boulder placed at the analytic height therefore hangs in the air above the
+ * triangle it is supposed to be resting on. Anything sat on the ground has to
+ * be sat on the ground that is actually drawn.
+ */
+export function meshHeightAt(regime: CorridorRegime, x: number, z: number): number {
+  const xs = terrainStationsX();
+  const zs = terrainStationsZ();
+  const i = bracket(xs, x);
+  const j = bracket(zs, z);
+  const x0 = xs[i];
+  const x1 = xs[Math.min(xs.length - 1, i + 1)];
+  const z0 = zs[j];
+  const z1 = zs[Math.min(zs.length - 1, j + 1)];
+  const tx = x1 > x0 ? (x - x0) / (x1 - x0) : 0;
+  const tz = z1 > z0 ? (z - z0) / (z1 - z0) : 0;
+  const h00 = corridorHeight(regime, x0, z0);
+  const h10 = corridorHeight(regime, x1, z0);
+  const h01 = corridorHeight(regime, x0, z1);
+  const h11 = corridorHeight(regime, x1, z1);
+  const a = h00 + (h10 - h00) * tx;
+  const b = h01 + (h11 - h01) * tx;
+  return a + (b - a) * tz;
+}
+
+/** Index of the station at or below `v`. */
+function bracket(stations: number[], v: number): number {
+  if (v <= stations[0]) return 0;
+  if (v >= stations[stations.length - 1]) return stations.length - 2;
+  let lo = 0;
+  let hi = stations.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (stations[mid] <= v) lo = mid;
+    else hi = mid;
+  }
+  return lo;
+}
+
+let cachedXs: number[] | null = null;
+let cachedZs: number[] | null = null;
+/** The mesh's own station grid, without pit cuts — they do not move the surface. */
+function terrainStationsX() {
+  if (!cachedXs) cachedXs = lateralStations(TERRAIN_WIDTH / 2, []);
+  return cachedXs;
+}
+function terrainStationsZ() {
+  if (!cachedZs) cachedZs = gridStations(TERRAIN_Z_END, TERRAIN_Z_START, TERRAIN_SEGMENTS_Z, []);
+  return cachedZs;
+}
+
+/**
  * A rectangular opening cut through both the carriageway and the terrain, so
  * the trial pit at a flagged defect is a real hole rather than a dark decal
  * painted on an unbroken surface.

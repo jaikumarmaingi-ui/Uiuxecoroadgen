@@ -371,6 +371,41 @@ export function makeTerrainDetailMaps(size = 512): SurfaceMaps {
   });
 }
 
+/**
+ * A soft radial falloff, for use as an alpha map.
+ *
+ * Anything laid flat on the ground as a quad — a sand drift, a stain, a patch
+ * — betrays itself with a hard rectangular edge. Feathering the alpha towards
+ * the border is what lets it sit on the surface instead of on top of it.
+ */
+export function makeSoftFalloffAlpha(size = 128): THREE.CanvasTexture {
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d")!;
+  const data = ctx.createImageData(size, size);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const nx = (x / (size - 1)) * 2 - 1;
+      const ny = (y / (size - 1)) * 2 - 1;
+      // Elliptical falloff with a noisy rim, so the edge is soft AND irregular.
+      const r = Math.hypot(nx, ny * 0.8);
+      const ragged = fbmTiled(x / size, y / size, 8, 3, 53) * 0.3;
+      const a = clamp01(1 - smootherstep(clamp01((r - 0.25 + ragged) / 0.75)));
+      const i = (y * size + x) * 4;
+      data.data[i] = 255;
+      data.data[i + 1] = 255;
+      data.data[i + 2] = 255;
+      data.data[i + 3] = a * 255;
+    }
+  }
+  ctx.putImageData(data, 0, 0);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  return tex;
+}
+
 /** Dispose every map in a set — call from the owning component's cleanup. */
 export function disposeMaps(maps: SurfaceMaps) {
   maps.map.dispose();

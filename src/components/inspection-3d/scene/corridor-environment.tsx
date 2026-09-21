@@ -11,12 +11,18 @@ import {
   ROAD_WIDTH_M,
   buildCorridorTerrain,
   buildRoadGeometry,
-  corridorHeight,
+  meshHeightAt,
   roadSurfaceY,
   type PitCut,
 } from "@/lib/inspection-3d/terrain";
 import type { CorridorRegime } from "@/lib/inspection-3d/regimes";
-import { makeGravelMaps, makeRoadMaps, makeRockMaps, makeTerrainDetailMaps } from "@/lib/inspection-3d/textures";
+import {
+  makeGravelMaps,
+  makeRoadMaps,
+  makeRockMaps,
+  makeSoftFalloffAlpha,
+  makeTerrainDetailMaps,
+} from "@/lib/inspection-3d/textures";
 import { TrialPit } from "./trial-pit";
 
 function mulberry32(seed: number) {
@@ -59,6 +65,7 @@ export function CorridorEnvironment({
   const gravelMaps = useMemo(() => makeGravelMaps(), []);
   const rockMaps = useMemo(() => makeRockMaps(), []);
   const terrainMaps = useMemo(() => makeTerrainDetailMaps(), []);
+  const driftAlpha = useMemo(() => (regime.props.sandDrift ? makeSoftFalloffAlpha() : null), [regime.props.sandDrift]);
 
   // Geometry and textures are owned by the memo, and react-three-fiber
   // disposes the objects it mounted when the canvas unmounts. Disposing them
@@ -97,7 +104,7 @@ export function CorridorEnvironment({
       const z = ROAD_START_Z - rng() * (roadLength + 60);
       const s = 0.35 + rng() * 1.6;
       return {
-        pos: [x, corridorHeight(regime, x, z) - s * 0.18, z] as [number, number, number],
+        pos: [x, meshHeightAt(regime, x, z) - s * 0.18, z] as [number, number, number],
         scale: [s, s * (0.55 + rng() * 0.5), s * (0.8 + rng() * 0.5)] as [number, number, number],
         rot: [rng() * 3, rng() * 6, rng() * 3] as [number, number, number],
       };
@@ -132,7 +139,7 @@ export function CorridorEnvironment({
       const z = ROAD_START_Z + 40 - rng() * (roadLength + 120);
       const h = hMin + rng() * (hMax - hMin);
       return {
-        pos: [x, corridorHeight(regime, x, z), z] as [number, number, number],
+        pos: [x, meshHeightAt(regime, x, z), z] as [number, number, number],
         h,
         r: h * (0.16 + rng() * 0.08),
         lean: (rng() - 0.5) * 0.1,
@@ -151,7 +158,7 @@ export function CorridorEnvironment({
       const z = ROAD_START_Z + 20 - rng() * (roadLength + 80);
       const s = 0.25 + rng() * 0.6;
       return {
-        pos: [x, corridorHeight(regime, x, z) + s * 0.3, z] as [number, number, number],
+        pos: [x, meshHeightAt(regime, x, z) + s * 0.3, z] as [number, number, number],
         scale: [s, s * (0.6 + rng() * 0.6), s] as [number, number, number],
         rot: [0, rng() * 6, 0] as [number, number, number],
       };
@@ -243,7 +250,15 @@ export function CorridorEnvironment({
       {drifts.length > 0 && (
         <Instances range={drifts.length} limit={drifts.length} receiveShadow>
           <planeGeometry args={[1, 1]} />
-          <meshStandardMaterial color="#b9a179" roughness={1} transparent opacity={0.9} side={THREE.DoubleSide} />
+          <meshStandardMaterial
+            color="#b9a179"
+            roughness={1}
+            transparent
+            opacity={0.95}
+            alphaMap={driftAlpha ?? undefined}
+            depthWrite={false}
+            side={THREE.DoubleSide}
+          />
           {drifts.map((d, i) => (
             <Instance key={i} position={d.pos} rotation={[-Math.PI / 2, 0, d.rot]} scale={d.scale} />
           ))}
@@ -367,10 +382,13 @@ function Trees({ trees, verdure }: { trees: TreeItem[]; verdure: readonly [numbe
       </Instances>
       <Instances range={trees.length} limit={trees.length} castShadow>
         <coneGeometry args={[1, 1, 7]} />
-        <meshStandardMaterial color={canopy} roughness={0.95} flatShading />
+        <meshStandardMaterial roughness={0.95} flatShading />
         {trees.map((t, i) => (
           <Instance
             key={i}
+            // Per-instance tint: a stand of identically coloured cones reads as
+            // wallpaper, and the variation costs nothing on an instanced mesh.
+            color={canopy.clone().multiplyScalar(t.tint)}
             position={[t.pos[0], t.pos[1] + t.h * 0.62, t.pos[2]]}
             scale={[t.r, t.h * 0.85, t.r]}
             rotation={[t.lean, i * 0.7, t.lean]}

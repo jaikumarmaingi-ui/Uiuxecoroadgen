@@ -30,7 +30,7 @@ export function CorridorSelector({
 }) {
   return (
     <div className="pointer-events-none absolute left-4 top-20 z-30 flex flex-col gap-1.5">
-      <div className="px-1 font-mono-tech text-[9px] font-bold uppercase tracking-[0.18em] text-text-tertiary">
+      <div className="w-fit rounded bg-[rgba(8,12,16,0.7)] px-1.5 py-0.5 font-mono-tech text-[9px] font-bold uppercase tracking-[0.18em] text-text-secondary">
         Corridor
       </div>
       {CORRIDOR_TERRAIN_ORDER.map((id) => {
@@ -45,7 +45,10 @@ export function CorridorSelector({
             title={disabled && !isActive ? "Finish or leave this inspection first" : regime.blurb}
             className={cn(
               "pointer-events-auto flex w-44 items-center gap-2.5 rounded-lg border px-2.5 py-2 text-left transition-colors",
-              "glass-panel backdrop-blur",
+              // Opaque rather than glass: the corridor behind this ranges from
+              // a dark gorge wall to a blown-out desert sky, and a translucent
+              // panel is unreadable against half of them.
+              "bg-[rgba(8,12,16,0.86)] backdrop-blur-sm",
               isActive
                 ? "border-cyan/50 bg-cyan/10"
                 : "border-white/10 hover:border-white/25 disabled:cursor-not-allowed disabled:opacity-35",

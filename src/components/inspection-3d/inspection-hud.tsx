@@ -21,7 +21,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PredictionChart } from "@/components/charts/prediction-chart";
 import { FeatureImportance } from "@/components/charts/feature-importance";
 import { RepairOptionCard } from "@/components/repair/repair-option-card";
-import { RISK_META } from "@/lib/risk";
 import { repairOptionsFor } from "@/lib/mock-data";
 import type { RoadSegment } from "@/lib/types";
 import { layerInspectionFor } from "./pavement-layers";
@@ -85,7 +84,16 @@ export function InspectionHUD({
   onRestart: () => void;
 }) {
   const router = useRouter();
-  const risk = RISK_META[segment.riskLevel];
+  // The badge describes the corridor in front of you, not the fixed demo
+  // segment: a desert corridor whose worst failure is moderate ravelling
+  // should not be labelled CRITICAL because the mock record says so.
+  const worst = useMemo(() => {
+    if (defects.some((d) => d.severity === "critical")) return "critical" as const;
+    if (defects.some((d) => d.severity === "high")) return "high" as const;
+    return "moderate" as const;
+  }, [defects]);
+  const corridorRisk = worst === "critical" ? "Critical" : worst === "high" ? "High Risk" : "Moderate";
+  const corridorTone = worst === "critical" ? ("red" as const) : worst === "high" ? ("amber" as const) : ("cyan" as const);
   const [selectedRepairId, setSelectedRepairId] = useState<string | null>(null);
 
   const topRepairs = useMemo(() => {
@@ -106,8 +114,8 @@ export function InspectionHUD({
               </div>
               <div className="font-mono-tech text-[9px] text-text-tertiary sm:text-[10px]">3D FIELD INSPECTION — DEMO DATA</div>
             </div>
-            <Badge tone={riskTone(segment.riskLevel)} className="ml-1">
-              {risk.label}
+            <Badge tone={corridorTone} className="ml-1">
+              {corridorRisk}
             </Badge>
           </div>
           <Button variant="secondary" size="sm" onClick={() => router.push("/field-inspection")}>
@@ -480,9 +488,3 @@ function MaterialInspector({
   );
 }
 
-function riskTone(level: RoadSegment["riskLevel"]): "cyan" | "green" | "amber" | "red" {
-  if (level === "healthy" || level === "good") return "green";
-  if (level === "moderate") return "amber";
-  if (level === "high-risk" || level === "critical") return "red";
-  return "cyan";
-}
