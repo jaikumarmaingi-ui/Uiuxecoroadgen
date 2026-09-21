@@ -17,35 +17,41 @@ import { EffectComposer, Bloom, Vignette, SSAO, SMAA } from "@react-three/postpr
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import * as THREE from "three";
 import type { RoadSegment } from "@/lib/types";
-import { RISK_META } from "@/lib/risk";
 import { PavementCrossSection } from "./pavement-cross-section";
 import { Atmosphere } from "./scene/atmosphere";
 import { CorridorEnvironment } from "./scene/corridor-environment";
+import { FailureSurfaces } from "./scene/failure-surfaces";
+import { DefectMarkers } from "./scene/defect-markers";
 import { InspectionVehicle, VehicleDust } from "./scene/vehicle";
-import { BENCH_HALF, ROAD_WIDTH_M, roadSurfaceY, type PitCut } from "@/lib/inspection-3d/terrain";
+import {
+  BENCH_HALF,
+  ROAD_START_Z,
+  ROAD_WIDTH_M,
+  roadSurfaceY,
+  type PitCut,
+} from "@/lib/inspection-3d/terrain";
+import type { CorridorRegime } from "@/lib/inspection-3d/regimes";
+import type { CorridorDefect } from "@/lib/inspection-3d/corridor-defects";
 import { LAYER_EXPLODE_RISE } from "./pavement-layers";
 import {
   APPROACH_RANGE,
-  DEFECT_Z,
   PARK_HEADING,
-  PARK_X,
-  PARK_Z,
   PIT_HALF,
-  PIT_POSITION,
   ROAD_HALF_DRIVABLE,
   START_Z,
+  parkSpotFor,
+  walkBoundsFor,
   type FlowState,
   type WorldRefState,
 } from "./types";
 
-const MAX_SPEED = 11;
+const MAX_SPEED = 13;
 const MAX_REVERSE = 4;
 const ACCEL = 9;
 const BRAKE = 15;
 const FRICTION = 5;
 const TURN_RATE = 1.55;
 const WALK_SPEED = 3.4;
-const WALK_BOUNDS = { minX: -7, maxX: 6, minZ: DEFECT_Z - 9, maxZ: PARK_Z + 5 };
 
 // Vertical midpoint of the exploded stack once it has lifted clear of the pit
 // (see LAYER_EXPLODE_RISE) — used to frame the cross-section camera and to
@@ -57,38 +63,28 @@ const PIT_TOP_Y = 0.3;
 
 const BASE_FOV = 52;
 
-/** The opening cut through the carriageway and terrain for the trial pit. */
-const PIT_CUT: PitCut = { x: PIT_POSITION[0], z: PIT_POSITION[2], half: PIT_HALF };
-/**
- * Height the extracted core is seated at.
- *
- * Taken from the LOW side of the cut rather than its centre: the core's top is
- * flat but the carriageway is cambered across it, so seating it at the mean
- * leaves it standing proud of the road on the outer edge. Seating it at the
- * lowest point of the rim means it can only ever sit at or below the
- * surrounding surface, which is how a cut block actually sits in its hole.
- */
-const PIT_SURFACE_Y = Math.min(
-  roadSurfaceY(PIT_POSITION[0] - PIT_HALF),
-  roadSurfaceY(PIT_POSITION[0] + PIT_HALF),
-);
-const PIT_ORIGIN: [number, number, number] = [PIT_POSITION[0], PIT_SURFACE_Y, PIT_POSITION[2]];
-
 export function InspectionScene({
   flow,
+  regime,
+  segment,
+  defects,
+  activeDefect,
   world,
   keys,
-  segment,
   selectedLayer,
   onApproach,
   onSelectLayer,
 }: {
   flow: FlowState;
+  regime: CorridorRegime;
+  segment: RoadSegment;
+  defects: CorridorDefect[];
+  /** The defect being inspected, or the next one ahead while driving. */
+  activeDefect: CorridorDefect | null;
   world: React.RefObject<WorldRefState>;
   keys: React.RefObject<Set<string>>;
-  segment: RoadSegment;
   selectedLayer: number | null;
-  onApproach: () => void;
+  onApproach: (defect: CorridorDefect) => void;
   onSelectLayer: (index: number) => void;
 }) {
   const vehicleRef = useRef<THREE.Group>(null);
@@ -103,6 +99,9 @@ export function InspectionScene({
   // feel like a camera operator riding along.
   const lookTarget = useRef(new THREE.Vector3(0, 1, START_Z - 10));
   const camShake = useRef(0);
+  // Fed to the sun rig so the shadow frustum tracks the inspector down the
+  // corridor instead of sitting over the origin.
+  const focusZ = useRef(START_Z);
 
   const driveable = flow === "driving" || flow === "approaching";
   const walkable = flow === "onfoot";
@@ -112,11 +111,23 @@ export function InspectionScene({
   const exploded = flow === "exploded" || flow === "analyzing" || flow === "results";
   const interactiveLayers = flow === "exploded" || flow === "results";
   const orbitEnabled = flow === "onfoot" || flow === "inspecting" || flow === "exploded" || flow === "results";
-  // Resolved hex, not the CSS variable: three.js cannot parse `var(...)`.
-  const riskColor = RISK_META[segment.riskLevel].hex;
-  // Scaled well below 1: this drives hairline cracking density in the road
-  // texture, and even a critical segment is not a shattered carriageway.
-  const distress = Math.min(0.5, Math.max(0.15, segment.distress.cracking / 200));
+
+  // The pit is cut where the inspection is actually happening. It only exists
+  // once the inspector is on foot: cutting a hole in the carriageway they are
+  // still driving along would be a hazard, not a survey.
+  const pitDefect = pitActive ? activeDefect : null;
+  const pit = useMemo<PitCut | undefined>(
+    () => (pitDefect ? { x: clampPitX(pitDefect.x), z: pitDefect.z, half: PIT_HALF } : undefined),
+    [pitDefect],
+  );
+  const pitOrigin = useMemo<[number, number, number] | null>(() => {
+    if (!pit) return null;
+    // Seated at the LOW side of the cut: the core's top is flat but the
+    // carriageway is cambered across it, so seating it at the mean leaves it
+    // standing proud of the road on the outer edge.
+    const y = Math.min(roadSurfaceY(pit.x - pit.half), roadSurfaceY(pit.x + pit.half));
+    return [pit.x, y, pit.z];
+  }, [pit]);
 
   useFrame((state, rawDelta) => {
     const delta = Math.min(rawDelta, 0.1);
@@ -146,15 +157,16 @@ export function InspectionScene({
       v.z -= Math.cos(v.heading) * v.speed * delta;
       v.x = THREE.MathUtils.clamp(v.x, -ROAD_HALF_DRIVABLE, ROAD_HALF_DRIVABLE);
 
-      if (flow === "driving" && v.z <= DEFECT_Z + APPROACH_RANGE) {
-        onApproach();
+      if (flow === "driving" && activeDefect && v.z <= activeDefect.z + APPROACH_RANGE) {
+        onApproach(activeDefect);
       }
-    } else if (flow === "parked" && !w.parked) {
-      v.x = THREE.MathUtils.damp(v.x, PARK_X, 4, delta);
-      v.z = THREE.MathUtils.damp(v.z, PARK_Z, 4, delta);
+    } else if (flow === "parked" && !w.parked && activeDefect) {
+      const spot = parkSpotFor(activeDefect);
+      v.x = THREE.MathUtils.damp(v.x, spot.x, 4, delta);
+      v.z = THREE.MathUtils.damp(v.z, spot.z, 4, delta);
       v.heading = THREE.MathUtils.damp(v.heading, PARK_HEADING, 4, delta);
       v.speed = THREE.MathUtils.damp(v.speed, 0, 6, delta);
-      if (Math.abs(v.x - PARK_X) < 0.04 && Math.abs(v.z - PARK_Z) < 0.04) w.parked = true;
+      if (Math.abs(v.x - spot.x) < 0.05 && Math.abs(v.z - spot.z) < 0.05) w.parked = true;
     }
 
     if (vehicleRef.current) {
@@ -162,7 +174,8 @@ export function InspectionScene({
       vehicleRef.current.rotation.y = v.heading;
     }
 
-    if (walkable) {
+    if (walkable && activeDefect) {
+      const bounds = walkBoundsFor(activeDefect);
       const c = w.character;
       let mx = 0;
       let mz = 0;
@@ -174,8 +187,8 @@ export function InspectionScene({
       if (len > 0.001) {
         mx /= len;
         mz /= len;
-        c.x = THREE.MathUtils.clamp(c.x + mx * WALK_SPEED * delta, WALK_BOUNDS.minX, WALK_BOUNDS.maxX);
-        c.z = THREE.MathUtils.clamp(c.z + mz * WALK_SPEED * delta, WALK_BOUNDS.minZ, WALK_BOUNDS.maxZ);
+        c.x = THREE.MathUtils.clamp(c.x + mx * WALK_SPEED * delta, bounds.minX, bounds.maxX);
+        c.z = THREE.MathUtils.clamp(c.z + mz * WALK_SPEED * delta, bounds.minZ, bounds.maxZ);
         c.heading = Math.atan2(mx, -mz);
       }
     }
@@ -184,6 +197,9 @@ export function InspectionScene({
       characterRef.current.rotation.y = w.character.heading;
       characterRef.current.visible = showCharacter;
     }
+
+    // Keep the sun's shadow frustum over whatever the camera is looking at.
+    focusZ.current = showCharacter ? w.character.z : v.z;
 
     // ------------------------------------------------------------ camera ---
     const camera = state.camera as THREE.PerspectiveCamera;
@@ -236,46 +252,47 @@ export function InspectionScene({
       camera.updateProjectionMatrix();
     }
 
-    if (exploded && !framedExploded.current) {
-      // The stack is four metres tall once it lifts; pull back and up so the
-      // whole cake is in shot rather than growing out of the top of frame.
-      camera.position.set(PIT_POSITION[0] + 3.6, STACK_MID_Y + 2.4, PIT_POSITION[2] + 8.4);
-      framedExploded.current = true;
-    } else if (!exploded) {
-      framedExploded.current = false;
-    }
+    if (pitOrigin) {
+      if (exploded && !framedExploded.current) {
+        // The stack is four metres tall once it lifts; pull back and up so the
+        // whole cake is in shot rather than growing out of the top of frame.
+        camera.position.set(pitOrigin[0] + 3.6, pitOrigin[1] + STACK_MID_Y + 2.4, pitOrigin[2] + 8.4);
+        framedExploded.current = true;
+      } else if (!exploded) {
+        framedExploded.current = false;
+      }
 
-    if (flow === "inspecting" && !framedPit.current) {
-      // Standing eye-height, slightly off-axis: a side elevation of the core
-      // in its pit, which then reads as a layer cake once it lifts out.
-      camera.position.set(PIT_POSITION[0] + 2.3, 2.3, PIT_POSITION[2] + 5.2);
-      framedPit.current = true;
-    } else if (!pitActive) {
-      framedPit.current = false;
+      if (flow === "inspecting" && !framedPit.current) {
+        // Standing eye-height, slightly off-axis: a side elevation of the core
+        // in its pit, which then reads as a layer cake once it lifts out.
+        camera.position.set(pitOrigin[0] + 2.3, pitOrigin[1] + 2.3, pitOrigin[2] + 5.2);
+        framedPit.current = true;
+      }
     }
+    if (!pitActive) framedPit.current = false;
 
     if (controlsRef.current) {
       if (flow === "onfoot") {
         controlsRef.current.target.set(w.character.x, 1.1, w.character.z);
-      } else if (pitActive) {
+      } else if (pitActive && pitOrigin) {
         // Rides up with the stack as it lifts, so the framing follows the
         // animation instead of cutting to it.
         const aimY = THREE.MathUtils.damp(
           controlsRef.current.target.y,
-          exploded ? STACK_MID_Y : PIT_TOP_Y,
+          pitOrigin[1] + (exploded ? STACK_MID_Y : PIT_TOP_Y),
           4.5,
           delta,
         );
-        controlsRef.current.target.set(PIT_POSITION[0], aimY, PIT_POSITION[2]);
+        controlsRef.current.target.set(pitOrigin[0], aimY, pitOrigin[2]);
       }
       controlsRef.current.update();
     }
 
-    if (flow === "analyzing" && scanRef.current) {
+    if (flow === "analyzing" && scanRef.current && pitOrigin) {
       scanT.current += delta * 0.9;
       // Sweep the full height of the lifted stack.
-      const y = STACK_MID_Y + Math.sin(scanT.current * 2.4) * (LAYER_EXPLODE_RISE * 0.6);
-      scanRef.current.position.set(PIT_POSITION[0], y, PIT_POSITION[2]);
+      const y = pitOrigin[1] + STACK_MID_Y + Math.sin(scanT.current * 2.4) * (LAYER_EXPLODE_RISE * 0.6);
+      scanRef.current.position.set(pitOrigin[0], y, pitOrigin[2]);
       const mat = scanRef.current.material as THREE.MeshBasicMaterial;
       mat.opacity = 0.35 + Math.sin(scanT.current * 8) * 0.1;
     }
@@ -283,15 +300,17 @@ export function InspectionScene({
 
   return (
     <>
-      <Atmosphere />
+      <Atmosphere regime={regime} focusZRef={focusZ} />
 
-      <CorridorEnvironment distress={distress} pit={PIT_CUT} />
-      <CorridorSign segment={segment} riskColor={riskColor} />
+      <CorridorEnvironment regime={regime} pit={pit} />
+      <CorridorSign regime={regime} />
 
-      <DefectMarker
-        visible={flow !== "inspecting" && flow !== "exploded" && flow !== "analyzing" && flow !== "results"}
-        color={riskColor}
-        probabilityPct={segment.probabilityOfFailurePct}
+      <FailureSurfaces defects={defects} excludeId={pitDefect?.id ?? null} />
+      <DefectMarkers
+        defects={defects}
+        activeId={activeDefect?.id ?? null}
+        labelledId={flow === "approaching" || flow === "parked" ? activeDefect?.id ?? null : null}
+        visible={!pitActive}
       />
 
       <group ref={vehicleRef} visible={showVehicle}>
@@ -303,14 +322,15 @@ export function InspectionScene({
         <CharacterMesh />
       </group>
 
-      {pitActive && (
+      {pitActive && pitOrigin && (
         <PavementCrossSection
           segment={segment}
-          position={PIT_ORIGIN}
+          position={pitOrigin}
           exploded={exploded}
           interactive={interactiveLayers}
           selectedLayer={selectedLayer}
           onSelectLayer={onSelectLayer}
+          defect={activeDefect}
         />
       )}
 
@@ -357,10 +377,16 @@ export function InspectionScene({
   );
 }
 
-/** Roadside chainage board on the cliff-side shoulder. */
-function CorridorSign({ segment, riskColor }: { segment: RoadSegment; riskColor: string }) {
+/** Keeps the pit inside the carriageway however close to the edge the defect is. */
+function clampPitX(x: number) {
+  const limit = ROAD_WIDTH_M / 2 - PIT_HALF - 0.1;
+  return THREE.MathUtils.clamp(x, -limit, limit);
+}
+
+/** Roadside chainage board at the head of the corridor. */
+function CorridorSign({ regime }: { regime: CorridorRegime }) {
   const x = -(ROAD_WIDTH_M / 2 + (BENCH_HALF - ROAD_WIDTH_M / 2) * 0.55);
-  const z = START_Z - 4;
+  const z = ROAD_START_Z - 18;
   return (
     <group position={[x, 0, z]}>
       <mesh position={[0, 0.9, 0]} castShadow>
@@ -373,67 +399,9 @@ function CorridorSign({ segment, riskColor }: { segment: RoadSegment; riskColor:
       </mesh>
       <Html position={[0, 2.05, 0.04]} center distanceFactor={14} occlude>
         <div
-          className="pointer-events-none whitespace-nowrap rounded border px-2.5 py-1 font-mono-tech text-[10px] font-bold uppercase tracking-wide"
-          style={{ borderColor: `${riskColor}88`, color: riskColor, background: "rgba(9,13,17,0.72)" }}
+          className="pointer-events-none whitespace-nowrap rounded border border-cyan/50 bg-[rgba(9,13,17,0.72)] px-2.5 py-1 font-mono-tech text-[10px] font-bold uppercase tracking-wide text-cyan"
         >
-          {segment.routeNumber} · {segment.segmentLabel}
-        </div>
-      </Html>
-    </group>
-  );
-}
-
-function DefectMarker({
-  visible,
-  color,
-  probabilityPct,
-}: {
-  visible: boolean;
-  color: string;
-  probabilityPct: number;
-}) {
-  const ping1 = useRef<THREE.Mesh>(null);
-  const ping2 = useRef<THREE.Mesh>(null);
-
-  useFrame(({ clock }) => {
-    const t = clock.elapsedTime;
-    for (const [ref, phase] of [
-      [ping1, 0],
-      [ping2, 1.1],
-    ] as const) {
-      const mesh = ref.current;
-      if (!mesh) continue;
-      const cycle = ((t + phase) % 2.2) / 2.2;
-      const s = 1 + cycle * 0.5;
-      mesh.scale.set(s, s, s);
-      const mat = mesh.material as THREE.MeshBasicMaterial;
-      mat.opacity = 0.5 * (1 - cycle);
-    }
-  });
-
-  if (!visible) return null;
-  return (
-    // Rings the open cut rather than covering it: the pit is a real hole in
-    // the carriageway, so a filled disc here would read as a lid on it.
-    <group position={[PIT_POSITION[0], PIT_SURFACE_Y + 0.006, DEFECT_Z]}>
-      <mesh rotation={[-Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[2.02, 2.1, 64]} />
-        <meshBasicMaterial color={color} transparent opacity={0.7} side={THREE.DoubleSide} depthWrite={false} />
-      </mesh>
-      <mesh ref={ping1} rotation={[-Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[1.98, 2.06, 64]} />
-        <meshBasicMaterial color={color} transparent opacity={0} side={THREE.DoubleSide} depthWrite={false} />
-      </mesh>
-      <mesh ref={ping2} rotation={[-Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[1.98, 2.06, 64]} />
-        <meshBasicMaterial color={color} transparent opacity={0} side={THREE.DoubleSide} depthWrite={false} />
-      </mesh>
-      <Html position={[0, 1.6, 0]} center distanceFactor={12}>
-        <div
-          className="pointer-events-none whitespace-nowrap rounded border px-2 py-1 font-mono-tech text-[10px] font-semibold uppercase tracking-wider shadow-lg"
-          style={{ borderColor: `${color}55`, color, background: "rgba(8,12,16,0.88)" }}
-        >
-          Flagged Defect · {probabilityPct}% Failure Risk
+          {regime.routeLabel} · {regime.chainageLabel}
         </div>
       </Html>
     </group>

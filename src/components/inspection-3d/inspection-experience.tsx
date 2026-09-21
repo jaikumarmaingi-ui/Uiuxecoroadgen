@@ -4,22 +4,36 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import * as THREE from "three";
 import { getSegment } from "@/lib/mock-data";
-import { createInitialWorld, type FlowState, type WorldRefState } from "./types";
+import { CORRIDOR_REGIMES, type CorridorTerrain } from "@/lib/inspection-3d/regimes";
+import { generateCorridorDefects, type CorridorDefect } from "@/lib/inspection-3d/corridor-defects";
+import { createInitialWorld, START_Z, type FlowState, type WorldRefState } from "./types";
 import { InspectionScene } from "./inspection-scene";
 import { InspectionHUD } from "./inspection-hud";
+import { CorridorSelector } from "./corridor-selector";
 
 const SEGMENT_ID = "nh3-srn-leh-210";
 const ANALYSIS_DURATION_MS = 1900;
 
 export function InspectionExperience() {
   const segment = useMemo(() => getSegment(SEGMENT_ID)!, []);
+  const [terrain, setTerrain] = useState<CorridorTerrain>("mountain");
   const [flow, setFlow] = useState<FlowState>("intro");
   const [selectedLayer, setSelectedLayer] = useState<number | null>(null);
+  /** Index into `defects` of the failure being driven to / inspected. */
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [inspectedIds, setInspectedIds] = useState<string[]>([]);
+
   const worldRef = useRef<WorldRefState>(createInitialWorld());
   const keys = useRef<Set<string>>(new Set());
 
+  const regime = CORRIDOR_REGIMES[terrain];
+  const defects = useMemo(() => generateCorridorDefects(terrain), [terrain]);
+  const activeDefect: CorridorDefect | null = defects[activeIndex] ?? null;
+  const remaining = Math.max(0, defects.length - inspectedIds.length);
+
   useEffect(() => {
     function down(e: KeyboardEvent) {
+      if (e.target instanceof HTMLElement && ["INPUT", "TEXTAREA"].includes(e.target.tagName)) return;
       keys.current.add(e.key.toLowerCase());
     }
     function up(e: KeyboardEvent) {
@@ -33,9 +47,30 @@ export function InspectionExperience() {
     };
   }, []);
 
+  const resetWorld = useCallback(() => {
+    Object.assign(worldRef.current, createInitialWorld());
+    keys.current.clear();
+    setSelectedLayer(null);
+    setActiveIndex(0);
+    setInspectedIds([]);
+  }, []);
+
+  const selectTerrain = useCallback(
+    (next: CorridorTerrain) => {
+      if (next === terrain) return;
+      setTerrain(next);
+      resetWorld();
+      setFlow("intro");
+    },
+    [terrain, resetWorld],
+  );
+
   const enterWorld = useCallback(() => setFlow("driving"), []);
   const onApproach = useCallback(() => setFlow((f) => (f === "driving" ? "approaching" : f)), []);
-  const stopAndInspect = useCallback(() => setFlow((f) => (f === "approaching" || f === "driving" ? "parked" : f)), []);
+  const stopAndInspect = useCallback(
+    () => setFlow((f) => (f === "approaching" || f === "driving" ? "parked" : f)),
+    [],
+  );
   const getOut = useCallback(() => {
     const world = worldRef.current;
     world.character.x = world.vehicle.x - 1.4;
@@ -49,11 +84,30 @@ export function InspectionExperience() {
     setSelectedLayer(null);
     setFlow("analyzing");
   }, []);
-  const restart = useCallback(() => {
-    Object.assign(worldRef.current, createInitialWorld());
+
+  /**
+   * Back in the vehicle and on to the next flagged failure.
+   *
+   * The corridor carries several failures, so finishing one is not finishing
+   * the survey. The vehicle picks up from where it parked rather than being
+   * teleported, and the next defect down-chainage becomes the target.
+   */
+  const continueToNext = useCallback(() => {
+    if (activeDefect) {
+      setInspectedIds((prev) => (prev.includes(activeDefect.id) ? prev : [...prev, activeDefect.id]));
+    }
     setSelectedLayer(null);
+    const world = worldRef.current;
+    world.parked = false;
+    world.vehicle.speed = 0;
+    setActiveIndex((i) => Math.min(defects.length - 1, i + 1));
+    setFlow("driving");
+  }, [activeDefect, defects.length]);
+
+  const restart = useCallback(() => {
+    resetWorld();
     setFlow("intro");
-  }, []);
+  }, [resetWorld]);
 
   useEffect(() => {
     if (flow !== "analyzing") return;
@@ -68,10 +122,13 @@ export function InspectionExperience() {
       else if (flow === "parked") getOut();
       else if (flow === "onfoot") inspectRoad();
       else if (flow === "exploded") triggerAI();
+      else if (flow === "results") continueToNext();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [flow, stopAndInspect, getOut, inspectRoad, triggerAI]);
+  }, [flow, stopAndInspect, getOut, inspectRoad, triggerAI, continueToNext]);
+
+  const isLast = activeIndex >= defects.length - 1;
 
   return (
     <div className="relative h-dvh w-dvw overflow-hidden bg-base">
@@ -79,29 +136,43 @@ export function InspectionExperience() {
         // Plain PCF: this three build has removed PCFSoftShadowMap, and
         // asking for "soft" just logs a warning and falls back to this anyway.
         shadows
-        camera={{ position: [0, 8, START_CAMERA_Z], fov: 52, near: 0.1, far: 900 }}
+        camera={{ position: [0, 8, START_Z + 10], fov: 52, near: 0.1, far: 1600 }}
         dpr={[1, 1.5]}
         gl={{
           antialias: false, // SMAA in the effect composer handles this
           // Filmic tone mapping is what stops a bright sun blowing the road
           // surface to white and lets the shadow side keep detail.
           toneMapping: THREE.ACESFilmicToneMapping,
-          toneMappingExposure: 0.7,
+          toneMappingExposure: regime.sky.exposure,
         }}
       >
         <InspectionScene
+          key={terrain}
           flow={flow}
+          regime={regime}
+          segment={segment}
+          defects={defects}
+          activeDefect={activeDefect}
           world={worldRef}
           keys={keys}
-          segment={segment}
           selectedLayer={selectedLayer}
           onApproach={onApproach}
           onSelectLayer={setSelectedLayer}
         />
       </Canvas>
+
+      <CorridorSelector active={terrain} onSelect={selectTerrain} disabled={flow !== "intro" && flow !== "driving"} />
+
       <InspectionHUD
         flow={flow}
         segment={segment}
+        regime={regime}
+        defects={defects}
+        activeDefect={activeDefect}
+        defectIndex={activeIndex}
+        remaining={remaining}
+        isLast={isLast}
+        world={worldRef}
         selectedLayer={selectedLayer}
         onSelectLayer={setSelectedLayer}
         onEnterWorld={enterWorld}
@@ -110,10 +181,9 @@ export function InspectionExperience() {
         onInspectRoad={inspectRoad}
         onExplodeLayers={explodeLayers}
         onTriggerAI={triggerAI}
+        onContinue={continueToNext}
         onRestart={restart}
       />
     </div>
   );
 }
-
-const START_CAMERA_Z = 44;

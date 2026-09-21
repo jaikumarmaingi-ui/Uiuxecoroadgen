@@ -1,4 +1,6 @@
 import type { RoadSegment } from "@/lib/types";
+import type { RoadFailureKind } from "@/lib/inspection-3d/regimes";
+import type { CorridorDefect } from "@/lib/inspection-3d/corridor-defects";
 
 export interface PavementLayerDef {
   key: string;
@@ -39,34 +41,75 @@ export interface LayerInspection {
   note: string;
 }
 
-export function layerInspectionFor(index: number, segment: RoadSegment): LayerInspection {
+/**
+ * Which layer a given failure originates in.
+ *
+ * The core is meant to answer "where did this start", so the layer the
+ * mechanism actually attacks has to read as the worst one. A ravelled surface
+ * with a pristine wearing course, or a fatigue failure with a sound base,
+ * would contradict the mechanism printed next to it.
+ */
+const ORIGIN_LAYER: Record<RoadFailureKind, number> = {
+  ravelling: 0,
+  bleeding: 0,
+  corrugation: 0,
+  potholeCluster: 1,
+  longitudinalCracking: 1,
+  rutting: 1,
+  crocodileCracking: 2,
+  rockfallBurial: 2,
+  edgeBreak: 3,
+  washout: 3,
+  settlement: 4,
+  frostHeave: 4,
+};
+
+/**
+ * Penalty applied to a layer's integrity for the failure under inspection:
+ * heaviest at the originating layer, tapering away from it.
+ */
+function failurePenalty(index: number, defect: CorridorDefect | null | undefined): number {
+  if (!defect) return 0;
+  const origin = ORIGIN_LAYER[defect.kind];
+  const sev = defect.severity === "critical" ? 34 : defect.severity === "high" ? 22 : 12;
+  const distance = Math.abs(index - origin);
+  return Math.round(sev / (1 + distance * 1.6));
+}
+
+export function layerInspectionFor(
+  index: number,
+  segment: RoadSegment,
+  defect?: CorridorDefect | null,
+): LayerInspection {
+  const penalty = failurePenalty(index, defect);
+  const adjust = (v: number) => Math.max(4, Math.min(100, Math.round(v) - penalty));
   switch (index) {
     case 0:
       return {
         label: "Surface Course",
         composition: "Dense-graded hot-mix wearing course",
-        integrityPct: Math.max(5, 100 - segment.distress.cracking),
+        integrityPct: adjust(100 - segment.distress.cracking),
         note: `Cracking index ${segment.distress.cracking}, ravelling ${segment.distress.ravelling}. The surface course is the first structural indicator to show freeze-thaw stress.`,
       };
     case 1:
       return {
         label: "Binder Course",
         composition: "Bituminous binder / intermediate course",
-        integrityPct: segment.structural.loadResponse,
+        integrityPct: adjust(segment.structural.loadResponse),
         note: `Load response ${segment.structural.loadResponse}/100 — measures how the binder course redistributes convoy axle loading before it reaches the base.`,
       };
     case 2:
       return {
         label: "Base Course",
         composition: "Crushed aggregate base course",
-        integrityPct: segment.structural.pavementStrength,
+        integrityPct: adjust(segment.structural.pavementStrength),
         note: `Pavement strength ${segment.structural.pavementStrength}/100. Primary load-bearing layer — deflection reading of ${segment.structural.deflection} suggests ${segment.structural.deflection > 45 ? "elevated" : "controlled"} structural movement under load.`,
       };
     case 3:
       return {
         label: "Sub-base",
         composition: "Granular sub-base, primary drainage layer",
-        integrityPct: segment.drainageScore,
+        integrityPct: adjust(segment.drainageScore),
         note: `Drainage score ${segment.drainageScore}/100 at ${segment.rainfallMm}mm annual rainfall. Poor permeability here accelerates frost-heave damage upward through the structure.`,
       };
     case 4:
@@ -74,7 +117,7 @@ export function layerInspectionFor(index: number, segment: RoadSegment): LayerIn
       return {
         label: "Subgrade",
         composition: "Compacted natural subgrade",
-        integrityPct: segment.structural.subgradeCondition,
+        integrityPct: adjust(segment.structural.subgradeCondition),
         note: `Subgrade condition ${segment.structural.subgradeCondition}/100 after ${segment.freezeThawCycles} annual freeze-thaw cycles. Root-cause layer behind most structural failures on this corridor.`,
       };
   }

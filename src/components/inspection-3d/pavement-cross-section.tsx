@@ -5,6 +5,7 @@ import { useFrame } from "@react-three/fiber";
 import { Html } from "@react-three/drei";
 import * as THREE from "three";
 import type { RoadSegment } from "@/lib/types";
+import type { CorridorDefect } from "@/lib/inspection-3d/corridor-defects";
 import {
   LAYER_EXPLODE_GAP,
   LAYER_EXPLODE_RISE,
@@ -16,6 +17,7 @@ import {
 
 export function PavementCrossSection({
   segment,
+  defect,
   position,
   exploded,
   interactive,
@@ -23,6 +25,8 @@ export function PavementCrossSection({
   onSelectLayer,
 }: {
   segment: RoadSegment;
+  /** The failure this core was taken at — drives which layer reads worst. */
+  defect?: CorridorDefect | null;
   position: [number, number, number];
   exploded: boolean;
   interactive: boolean;
@@ -36,12 +40,12 @@ export function PavementCrossSection({
   const layers = useMemo(
     () =>
       PAVEMENT_LAYERS.map((def, i) => {
-        const inspection = layerInspectionFor(i, segment);
+        const inspection = layerInspectionFor(i, segment, defect);
         const distressAmount = THREE.MathUtils.clamp(1 - inspection.integrityPct / 100, 0, 1);
         const color = new THREE.Color(def.baseColor).lerp(new THREE.Color(def.distressColor), distressAmount * 0.75);
         return { ...def, color, distressAmount, inspection };
       }),
-    [segment],
+    [segment, defect],
   );
 
   useFrame((_, delta) => {
