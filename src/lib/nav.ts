@@ -9,6 +9,7 @@ import {
   Leaf,
   FileText,
   Database,
+  ClipboardList,
   Settings,
   type LucideIcon,
 } from "lucide-react";
@@ -26,6 +27,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "AI Insights", href: "/ai-insights", icon: BrainCircuit, description: "Model performance & explainability" },
   { label: "Condition Monitoring", href: "/condition-monitoring", icon: ActivitySquare, description: "Distress & sensor telemetry" },
   { label: "Risk & Prediction", href: "/risk-prediction", icon: Radar, description: "Where will the road fail next" },
+  { label: "Survey Report", href: "/survey-report", icon: ClipboardList, description: "Work package from the 3D survey" },
   { label: "Repair Recommendations", href: "/repair-recommendations", icon: Wrench, description: "AI repair intelligence" },
   { label: "Repair Planning", href: "/repair-planning", icon: KanbanSquare, description: "Pipeline & scheduling" },
   { label: "Sustainability Impact", href: "/sustainability", icon: Leaf, description: "CO₂, material & waste impact" },

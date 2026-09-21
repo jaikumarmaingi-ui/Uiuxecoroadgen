@@ -20,8 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PredictionChart } from "@/components/charts/prediction-chart";
 import { FeatureImportance } from "@/components/charts/feature-importance";
-import { RepairOptionCard } from "@/components/repair/repair-option-card";
-import { repairOptionsFor } from "@/lib/mock-data";
+import { TreatmentCard } from "./treatment-card";
 import type { RoadSegment } from "@/lib/types";
 import { layerInspectionFor } from "./pavement-layers";
 import { FAILURE_META, type CorridorRegime } from "@/lib/inspection-3d/regimes";
@@ -31,6 +30,8 @@ import {
   type CorridorDefect,
 } from "@/lib/inspection-3d/corridor-defects";
 import { ROAD_LENGTH_M, ROAD_START_Z } from "@/lib/inspection-3d/terrain";
+import { diagnoseDefect, LAYER_LABEL } from "@/lib/inspection-3d/diagnosis";
+import { matchTreatments, type TreatmentQuote } from "@/lib/inspection-3d/treatments";
 import type { FlowState, WorldRefState } from "./types";
 
 const DISTRESS_LABELS: { key: keyof RoadSegment["distress"]; label: string }[] = [
@@ -62,6 +63,7 @@ export function InspectionHUD({
   onTriggerAI,
   onContinue,
   onRestart,
+  onChooseTreatment,
 }: {
   flow: FlowState;
   segment: RoadSegment;
@@ -82,6 +84,7 @@ export function InspectionHUD({
   onTriggerAI: () => void;
   onContinue: () => void;
   onRestart: () => void;
+  onChooseTreatment: (quote: TreatmentQuote) => void;
 }) {
   const router = useRouter();
   // The badge describes the corridor in front of you, not the fixed demo
@@ -94,11 +97,31 @@ export function InspectionHUD({
   }, [defects]);
   const corridorRisk = worst === "critical" ? "Critical" : worst === "high" ? "High Risk" : "Moderate";
   const corridorTone = worst === "critical" ? ("red" as const) : worst === "high" ? ("amber" as const) : ("cyan" as const);
-  const [selectedRepairId, setSelectedRepairId] = useState<string | null>(null);
+  /**
+   * The treatment the inspector picked, scoped to the defect they picked it
+   * for. Treatment ids repeat across failures, so an unscoped id would carry
+   * a previous failure's selection onto the next one and highlight a card
+   * nobody chose here.
+   */
+  const [picked, setPicked] = useState<{ defectId: string; treatmentId: string } | null>(null);
 
-  const topRepairs = useMemo(() => {
-    return [...repairOptionsFor(segment.id)].sort((a, b) => b.suitabilityScore - a.suitabilityScore).slice(0, 3);
-  }, [segment.id]);
+  /**
+   * The findings for the failure actually under inspection.
+   *
+   * Previously everything below came from a fixed demo segment, so a desert
+   * bleeding failure and a Himalayan frost heave produced the same
+   * explanation, the same curve and the same recommended repair — which
+   * contradicted the mechanism printed beside them.
+   */
+  const diagnosis = useMemo(
+    () => (activeDefect ? diagnoseDefect(activeDefect, regime) : null),
+    [activeDefect, regime],
+  );
+  const match = useMemo(
+    () => (activeDefect && diagnosis ? matchTreatments(activeDefect, diagnosis, regime) : null),
+    [activeDefect, diagnosis, regime],
+  );
+  const treatments = match?.options ?? [];
 
   const showSidePanel = flow === "inspecting" || flow === "exploded" || flow === "analyzing" || flow === "results";
 
@@ -276,46 +299,73 @@ export function InspectionHUD({
               </Card>
             )}
 
-            {flow === "results" && (
+            {flow === "results" && diagnosis && match && activeDefect && (
               <>
                 <Card className="glass-panel p-4">
                   <div className="mb-2 flex items-center gap-2">
                     <CheckCircle2 className="h-4 w-4 text-green" />
                     <h2 className="font-display text-sm font-bold text-text-primary">AI Analysis Complete</h2>
                   </div>
-                  <p className="text-xs leading-relaxed text-text-tertiary">{segment.aiExplanation}</p>
+                  <p className="font-display text-sm font-semibold leading-snug text-text-primary">
+                    {diagnosis.headline}
+                  </p>
+                  <p className="mt-2 text-xs leading-relaxed text-text-tertiary">{diagnosis.explanation}</p>
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    <Badge tone={diagnosis.structural ? "red" : "amber"}>
+                      {diagnosis.structural ? "Structural failure" : "Surface-bound failure"}
+                    </Badge>
+                    <Badge tone="neutral">Origin: {LAYER_LABEL[diagnosis.originLayer]}</Badge>
+                    <Badge tone={diagnosis.timeToInterventionDays <= 30 ? "red" : "cyan"}>
+                      Intervene within {diagnosis.timeToInterventionDays} d
+                    </Badge>
+                  </div>
                 </Card>
 
                 <Card className="p-0">
                   <CardHeader>
-                    <CardTitle>Predicted Deterioration</CardTitle>
+                    <CardTitle>Deterioration If Untreated</CardTitle>
                   </CardHeader>
                   <CardContent>
                     <PredictionChart
                       height={160}
-                      data={segment.predictedDeterioration.map((d) => ({ label: d.label, health: d.health }))}
+                      data={diagnosis.forecast.map((d) => ({ label: d.label, health: d.health }))}
                       series={[{ key: "health", label: "Predicted Health", color: "var(--accent-cyan)" }]}
                     />
                   </CardContent>
                 </Card>
 
                 <FeatureImportance
-                  contributions={segment.featureContributions}
-                  explanation={segment.aiExplanation}
-                  confidencePct={segment.predictionConfidencePct}
-                  lastUpdatedIso={segment.lastInspectionIso}
+                  contributions={diagnosis.contributions}
+                  explanation={diagnosis.explanation}
+                  confidencePct={diagnosis.confidencePct}
+                  // No freshness line: this finding came from a core cut
+                  // moments ago, and the demo segment's inspection date would
+                  // date it to whenever that record says, which is not when
+                  // this analysis ran.
                 />
 
                 <div className="space-y-2.5">
-                  <h2 className="px-1 font-display text-sm font-bold text-text-primary">Recommended Repairs</h2>
-                  {topRepairs.map((opt, i) => (
-                    <RepairOptionCard
-                      key={opt.id}
-                      option={opt}
+                  <div className="px-1">
+                    <h2 className="font-display text-sm font-bold text-text-primary">Matched Treatments</h2>
+                    <p className="mt-0.5 text-[11px] text-text-tertiary">
+                      Priced against the {diagnosis.areaM2} m² this failure actually covers, not a per-kilometre
+                      rate.
+                    </p>
+                  </div>
+                  {treatments.map((q, i) => (
+                    <TreatmentCard
+                      key={q.def.id}
+                      quote={q}
                       letter={String.fromCharCode(65 + i)}
-                      recommended={opt.id === segment.recommendedRepairId}
-                      selected={selectedRepairId === opt.id}
-                      onSelect={() => setSelectedRepairId(opt.id)}
+                      selected={
+                        (picked?.defectId === activeDefect.id
+                          ? picked.treatmentId
+                          : match.recommended.def.id) === q.def.id
+                      }
+                      onSelect={() => {
+                        setPicked({ defectId: activeDefect.id, treatmentId: q.def.id });
+                        onChooseTreatment(q);
+                      }}
                     />
                   ))}
                 </div>
@@ -334,8 +384,12 @@ export function InspectionHUD({
                     <Button variant="secondary" className="flex-1" onClick={onRestart}>
                       Restart
                     </Button>
-                    <Button variant="primary" className="flex-1" onClick={() => router.push("/condition-monitoring")}>
-                      Sync to Dashboard
+                    <Button
+                      variant="primary"
+                      className="flex-1"
+                      onClick={() => router.push("/survey-report")}
+                    >
+                      Survey report
                     </Button>
                   </div>
                 </div>

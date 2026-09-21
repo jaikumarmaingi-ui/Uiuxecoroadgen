@@ -6,6 +6,15 @@ import * as THREE from "three";
 import { getSegment } from "@/lib/mock-data";
 import { CORRIDOR_REGIMES, type CorridorTerrain } from "@/lib/inspection-3d/regimes";
 import { generateCorridorDefects, type CorridorDefect } from "@/lib/inspection-3d/corridor-defects";
+import { diagnoseDefect } from "@/lib/inspection-3d/diagnosis";
+import { matchTreatments, type TreatmentQuote } from "@/lib/inspection-3d/treatments";
+import { ROAD_LENGTH_M } from "@/lib/inspection-3d/terrain";
+import {
+  makeEntry,
+  saveSurvey,
+  surveyFrom,
+  type SurveyEntry,
+} from "@/lib/inspection-3d/survey";
 import { createInitialWorld, START_Z, type FlowState, type WorldRefState } from "./types";
 import { InspectionScene } from "./inspection-scene";
 import { InspectionHUD } from "./inspection-hud";
@@ -22,6 +31,8 @@ export function InspectionExperience() {
   /** Index into `defects` of the failure being driven to / inspected. */
   const [activeIndex, setActiveIndex] = useState(0);
   const [inspectedIds, setInspectedIds] = useState<string[]>([]);
+  /** Treatment chosen per defect id; absent means the recommendation stands. */
+  const [chosen, setChosen] = useState<Record<string, TreatmentQuote>>({});
 
   const worldRef = useRef<WorldRefState>(createInitialWorld());
   const keys = useRef<Set<string>>(new Set());
@@ -29,6 +40,7 @@ export function InspectionExperience() {
   const regime = CORRIDOR_REGIMES[terrain];
   const defects = useMemo(() => generateCorridorDefects(terrain), [terrain]);
   const activeDefect: CorridorDefect | null = defects[activeIndex] ?? null;
+  const defectCount = defects.length;
   const remaining = Math.max(0, defects.length - inspectedIds.length);
 
   useEffect(() => {
@@ -53,6 +65,7 @@ export function InspectionExperience() {
     setSelectedLayer(null);
     setActiveIndex(0);
     setInspectedIds([]);
+    setChosen({});
   }, []);
 
   const selectTerrain = useCallback(
@@ -63,6 +76,65 @@ export function InspectionExperience() {
       setFlow("intro");
     },
     [terrain, resetWorld],
+  );
+
+  // A new corridor is a new survey: carrying entries across would produce a
+  // work package spanning two unrelated routes.
+  useEffect(() => {
+    entriesRef.current.clear();
+    startedIsoRef.current = new Date().toISOString();
+    saveSurvey(
+      surveyFrom(CORRIDOR_REGIMES[terrain], ROAD_LENGTH_M, defectCount, startedIsoRef.current, []),
+    );
+  }, [terrain, defectCount]);
+
+  /**
+   * The work package being assembled, kept in a ref because it is an output of
+   * the session rather than something the scene renders.
+   *
+   * A Map keyed by defect id: re-inspecting a failure replaces its job rather
+   * than adding a second one at the same chainage, and mutating it by method
+   * call keeps it clear of the compiler's ref-immutability rule.
+   */
+  const entriesRef = useRef<Map<string, SurveyEntry>>(new Map());
+  const startedIsoRef = useRef<string>(new Date().toISOString());
+
+  /**
+   * Record one inspected failure and its accepted treatment.
+   *
+   * Called as soon as the analysis resolves rather than when the inspector
+   * drives on, so the last failure on a corridor is captured too — it has no
+   * "continue" step to hang the commit on. Re-committing the same defect
+   * replaces its entry, so changing the treatment updates the package instead
+   * of adding a second job at the same chainage.
+   */
+  const commitInspection = useCallback(
+    (defect: CorridorDefect, quote?: TreatmentQuote) => {
+      const diagnosis = diagnoseDefect(defect, regime);
+      const chosenQuote = quote ?? matchTreatments(defect, diagnosis, regime).recommended;
+      entriesRef.current.set(defect.id, makeEntry(defect, diagnosis, chosenQuote));
+      saveSurvey(
+        surveyFrom(
+          regime,
+          ROAD_LENGTH_M,
+          defectCount,
+          startedIsoRef.current,
+          entriesRef.current.values(),
+        ),
+      );
+    },
+    [regime, defectCount],
+  );
+
+  const chooseTreatment = useCallback(
+    (quote: TreatmentQuote) => {
+      if (!activeDefect) return;
+      // Recording the choice is enough: the effect watching `chosen` commits
+      // it, so calling commitInspection here as well would write the same
+      // entry twice.
+      setChosen((prev) => ({ ...prev, [activeDefect.id]: quote }));
+    },
+    [activeDefect],
   );
 
   const enterWorld = useCallback(() => setFlow("driving"), []);
@@ -114,6 +186,11 @@ export function InspectionExperience() {
     const t = setTimeout(() => setFlow("results"), ANALYSIS_DURATION_MS);
     return () => clearTimeout(t);
   }, [flow]);
+
+  useEffect(() => {
+    if (flow !== "results" || !activeDefect) return;
+    commitInspection(activeDefect, chosen[activeDefect.id]);
+  }, [flow, activeDefect, chosen, commitInspection]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -183,6 +260,7 @@ export function InspectionExperience() {
         onTriggerAI={triggerAI}
         onContinue={continueToNext}
         onRestart={restart}
+        onChooseTreatment={chooseTreatment}
       />
     </div>
   );
