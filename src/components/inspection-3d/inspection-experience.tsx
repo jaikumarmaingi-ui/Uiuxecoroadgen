@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas } from "@react-three/fiber";
+import * as THREE from "three";
 import { getSegment } from "@/lib/mock-data";
 import { createInitialWorld, type FlowState, type WorldRefState } from "./types";
 import { InspectionScene } from "./inspection-scene";
@@ -74,7 +75,18 @@ export function InspectionExperience() {
 
   return (
     <div className="relative h-dvh w-dvw overflow-hidden bg-base">
-      <Canvas shadows camera={{ position: [0, 8, START_CAMERA_Z], fov: 52, near: 0.1, far: 400 }} dpr={[1, 1.6]}>
+      <Canvas
+        shadows="soft"
+        camera={{ position: [0, 8, START_CAMERA_Z], fov: 52, near: 0.1, far: 900 }}
+        dpr={[1, 1.5]}
+        gl={{
+          antialias: false, // SMAA in the effect composer handles this
+          // Filmic tone mapping is what stops a bright sun blowing the road
+          // surface to white and lets the shadow side keep detail.
+          toneMapping: THREE.ACESFilmicToneMapping,
+          toneMappingExposure: 0.7,
+        }}
+      >
         <InspectionScene
           flow={flow}
           world={worldRef}

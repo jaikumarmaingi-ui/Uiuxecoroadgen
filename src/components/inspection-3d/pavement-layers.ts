@@ -19,6 +19,19 @@ export const LAYER_THICKNESS = 0.24;
 export const LAYER_EXPLODE_GAP = 0.6;
 export const LAYER_FOOTPRINT = 2.5;
 
+/**
+ * How far the whole stack lifts out of the trial pit when it explodes.
+ *
+ * The layers explode downwards from the surface course, so an exploded stack
+ * left in place sits entirely below ground — and framing it means putting the
+ * camera underneath the terrain, which renders as the stack floating in an
+ * empty sky. Lifting the assembly by its own exploded depth (plus a little
+ * clearance) keeps the surface course on top, puts the whole thing in front of
+ * a standing observer, and reads as the exploded diagram it is meant to be.
+ */
+export const LAYER_EXPLODE_RISE =
+  (PAVEMENT_LAYERS.length - 1) * (LAYER_THICKNESS + LAYER_EXPLODE_GAP) + 0.55;
+
 export interface LayerInspection {
   label: string;
   composition: string;
