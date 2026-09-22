@@ -71,18 +71,28 @@ function beddingWave(x: number, z: number): number {
 /**
  * The talus apron banked against the toe of the cut face.
  *
- * Debris does not form an even berm along the corridor — it is funnelled down
- * gullies and piles into cones that coalesce at their feet, so the apron is
- * modulated along Z and thickest where a gully feeds it. The wedge rises fast
- * out of the drainage line at the bench edge and tapers out upslope, which is
- * the profile a pile at the angle of repose makes against a steeper face.
+ * The cut profile leaves the bench edge at between 40 and 60 degrees, which is
+ * steeper than the angle of repose along its whole length. Nothing can rest on
+ * a face that steep: debris rolls to the bottom and piles where the face meets
+ * the bench, which is exactly what the catch ditch at the toe of a road cut is
+ * dug to hold. So the apron is deepest against the toe and thins upslope —
+ * banked against the face rather than lying on it.
+ *
+ * It is not an even berm either. Debris is funnelled down gullies and piles
+ * into cones that coalesce at their feet, so the depth is modulated along the
+ * corridor and sharpened, which leaves distinct lobes with starved ground
+ * between them.
+ *
+ * The ramp-in over the first metre keeps the bench itself exactly flat: a pile
+ * that stepped straight up off the shoulder would be a wall, and the shoulder
+ * has to stay parkable.
  */
 function talusApron(regime: CorridorRegime, lat: number, z: number): number {
   if (regime.talus <= 0.001) return 0;
   const d = lat - BENCH_HALF;
   if (d <= 0 || d >= TALUS_REACH) return 0;
   const u = d / TALUS_REACH;
-  const wedge = smoothstep(0, 0.16, u) * (1 - smoothstep(0.3, 1, u));
+  const wedge = smoothstep(0, 0.07, u) * Math.pow(1 - smoothstep(0.06, 1, u), 1.5);
   // Cone spacing along the corridor; sharpened so the lobes are distinct.
   const feed = fbm(z * 0.021, 41.7, SEED + 61, 2) * 0.5 + 0.5;
   const cones = 0.3 + 0.7 * Math.pow(feed, 1.7);
@@ -151,7 +161,7 @@ export function corridorHeight(regime: CorridorRegime, x: number, z: number): nu
   if (isCutSide && regime.bedding > 0.001) {
     const exposure = smoothstep(BENCH_HALF + 2, BENCH_HALF + 9, lat) * (1 - smoothstep(60, 130, lat));
     if (exposure > 0.01) {
-      h += beddingWave(x, z) * 0.34 * regime.bedding * exposure;
+      h += beddingWave(x, z) * 0.85 * regime.bedding * exposure;
     }
   }
 
@@ -404,7 +414,7 @@ export function buildCorridorTerrain(
         const bed = beddingWave(x, z);
         const bandLo = mix3(palette.rockDark, [0.09, 0.08, 0.075], 0.35);
         const bandHi = mix3(palette.rockLight, [0.74, 0.70, 0.64], 0.3);
-        rock = mix3(rock, bed > 0 ? bandHi : bandLo, Math.abs(bed) * 0.4 * regime.bedding);
+        rock = mix3(rock, bed > 0 ? bandHi : bandLo, Math.abs(bed) * 0.55 * regime.bedding);
       }
 
       color = mix3(color, rock, smoothstep(rockLo, rockHi, slope));

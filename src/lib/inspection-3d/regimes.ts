@@ -260,7 +260,7 @@ const MOUNTAIN: CorridorRegime = {
   detailScale: 1,
   aheadHeight: 40,
   // High pass: a blasted rock cut sheds constantly, and the bedding is exposed.
-  talus: 2.4,
+  talus: 5.2,
   bedding: 1.0,
   palette: {
     rockDark: [0.19, 0.19, 0.2],
@@ -334,7 +334,7 @@ const HILLY: CorridorRegime = {
   detailScale: 1.3,
   aheadHeight: 22,
   // Ghat section: a weathered rock cut, partly soil-covered.
-  talus: 1.3,
+  talus: 3.0,
   bedding: 0.7,
   palette: {
     rockDark: [0.2, 0.2, 0.18],
@@ -479,7 +479,7 @@ const DESERT: CorridorRegime = {
   detailScale: 0.55,
   aheadHeight: 12,
   // Desert: wind strips the fines, leaving a thin lag rather than a talus apron.
-  talus: 0.5,
+  talus: 1.2,
   bedding: 0.35,
   palette: {
     rockDark: [0.3, 0.25, 0.18],
@@ -553,7 +553,7 @@ const FOREST: CorridorRegime = {
   detailScale: 1.1,
   aheadHeight: 18,
   // Forest: vegetation binds the slope and buries most of the debris.
-  talus: 0.7,
+  talus: 1.7,
   bedding: 0.25,
   palette: {
     rockDark: [0.15, 0.17, 0.13],
