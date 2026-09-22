@@ -60,9 +60,20 @@ export function SlopeDebris({
     const out: Rock[] = [];
 
     // Slide runs: a handful of places along the corridor, not a ribbon.
-    const runs = Math.max(2, Math.round(5 * amount));
+    //
+    // Stratified rather than scattered, the way the flagged defects are. Left
+    // to chance the runs clustered past the 500 m mark and the first half of
+    // the corridor had nothing on it — which, with the haze a slide brings
+    // down, meant the hazard was invisible from the start line however much
+    // material was generated.
+    const runs = Math.max(3, Math.round(6 * amount));
+    const firstZ = ROAD_START_Z - 45;
+    const lastZ = ROAD_END_Z + 120;
+    const span = firstZ - lastZ;
     for (let r = 0; r < runs; r++) {
-      const centreZ = ROAD_START_Z - 120 - rng() * (ROAD_START_Z - ROAD_END_Z - 240);
+      const slot = (r + 0.5) / runs;
+      const jitter = (rng() - 0.5) * (0.6 / runs);
+      const centreZ = firstZ - Math.min(0.98, Math.max(0.02, slot + jitter)) * span;
       const spread = 18 + rng() * 34;
       const perRun = Math.round((26 + rng() * 34) * amount);
 
