@@ -164,6 +164,23 @@ export interface CorridorRegime {
   /** Height of the range closing the far end of the corridor. */
   aheadHeight: number;
 
+  /**
+   * Depth of the talus apron banked against the toe of the cut face.
+   *
+   * A cut slope sheds material continuously — freeze-thaw prises blocks off
+   * the face and they come to rest at its base at the angle of repose. The
+   * corridor already names rockfall as a failure mode; a cut face with no
+   * debris beneath it contradicts the mechanism printed in the panel. 0
+   * disables it, for regimes with no rock face to shed from.
+   */
+  talus: number;
+  /**
+   * Strength of bedding in the exposed rock: near-horizontal strata banding
+   * the cut face, with the resistant beds standing slightly proud. 0 for
+   * regimes whose slopes are soil or sand rather than cut rock.
+   */
+  bedding: number;
+
   palette: {
     rockDark: RGB;
     rockLight: RGB;
@@ -242,6 +259,9 @@ const MOUNTAIN: CorridorRegime = {
   farAmp: 34,
   detailScale: 1,
   aheadHeight: 40,
+  // High pass: a blasted rock cut sheds constantly, and the bedding is exposed.
+  talus: 2.4,
+  bedding: 1.0,
   palette: {
     rockDark: [0.19, 0.19, 0.2],
     rockLight: [0.4, 0.39, 0.39],
@@ -313,6 +333,9 @@ const HILLY: CorridorRegime = {
   farAmp: 18,
   detailScale: 1.3,
   aheadHeight: 22,
+  // Ghat section: a weathered rock cut, partly soil-covered.
+  talus: 1.3,
+  bedding: 0.7,
   palette: {
     rockDark: [0.2, 0.2, 0.18],
     rockLight: [0.38, 0.37, 0.33],
@@ -382,6 +405,9 @@ const PLAINS: CorridorRegime = {
   farAmp: 4,
   detailScale: 0.7,
   aheadHeight: 6,
+  // Embankment through flat country — no cut face to shed from.
+  talus: 0.0,
+  bedding: 0.0,
   palette: {
     rockDark: [0.22, 0.21, 0.17],
     rockLight: [0.36, 0.34, 0.28],
@@ -452,6 +478,9 @@ const DESERT: CorridorRegime = {
   farAmp: 11,
   detailScale: 0.55,
   aheadHeight: 12,
+  // Desert: wind strips the fines, leaving a thin lag rather than a talus apron.
+  talus: 0.5,
+  bedding: 0.35,
   palette: {
     rockDark: [0.3, 0.25, 0.18],
     rockLight: [0.52, 0.45, 0.33],
@@ -523,6 +552,9 @@ const FOREST: CorridorRegime = {
   farAmp: 13,
   detailScale: 1.1,
   aheadHeight: 18,
+  // Forest: vegetation binds the slope and buries most of the debris.
+  talus: 0.7,
+  bedding: 0.25,
   palette: {
     rockDark: [0.15, 0.17, 0.13],
     rockLight: [0.28, 0.3, 0.24],
