@@ -32,6 +32,7 @@ import {
 } from "@/lib/inspection-3d/corridor-defects";
 import { ROAD_LENGTH_M, ROAD_START_Z } from "@/lib/inspection-3d/terrain";
 import { diagnoseDefect, LAYER_LABEL } from "@/lib/inspection-3d/diagnosis";
+import { CONDITIONS, type CorridorCondition } from "@/lib/inspection-3d/conditions";
 import { matchTreatments, type TreatmentQuote } from "@/lib/inspection-3d/treatments";
 import type { FlowState, WorldRefState } from "./types";
 
@@ -48,6 +49,7 @@ export function InspectionHUD({
   flow,
   segment,
   regime,
+  condition = "clear",
   defects,
   activeDefect,
   defectIndex,
@@ -69,6 +71,7 @@ export function InspectionHUD({
   flow: FlowState;
   segment: RoadSegment;
   regime: CorridorRegime;
+  condition?: CorridorCondition;
   defects: CorridorDefect[];
   activeDefect: CorridorDefect | null;
   defectIndex: number;
@@ -114,9 +117,10 @@ export function InspectionHUD({
    * explanation, the same curve and the same recommended repair — which
    * contradicted the mechanism printed beside them.
    */
+  const cond = CONDITIONS[condition];
   const diagnosis = useMemo(
-    () => (activeDefect ? diagnoseDefect(activeDefect, regime) : null),
-    [activeDefect, regime],
+    () => (activeDefect ? diagnoseDefect(activeDefect, regime, condition) : null),
+    [activeDefect, regime, condition],
   );
   const match = useMemo(
     () => (activeDefect && diagnosis ? matchTreatments(activeDefect, diagnosis, regime) : null),
@@ -240,7 +244,7 @@ export function InspectionHUD({
           </CenterPrompt>
         )}
 
-        {flow === "onfoot" && (
+        {flow === "onfoot" && cond.inspectable && (
           <CenterPrompt>
             <Footprints className="h-5 w-5 text-cyan" />
             <div>
@@ -249,6 +253,25 @@ export function InspectionHUD({
             </div>
             <Button variant="primary" onClick={onInspectRoad}>
               Inspect Road <span className="font-mono-tech text-[10px] opacity-70">[E]</span>
+            </Button>
+          </CenterPrompt>
+        )}
+
+        {/* The condition model says the pavement cannot be opened in these
+            conditions, so the UI has to honour that rather than offer the
+            button anyway — a rule the product states and then lets you break
+            is worse than no rule. The survey continues from the vehicle. */}
+        {flow === "onfoot" && !cond.inspectable && (
+          <CenterPrompt>
+            <TriangleAlert className="h-5 w-5 shrink-0 text-critical" />
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-critical">
+                Trial pit not possible — {cond.label.toLowerCase()}
+              </div>
+              <div className="text-xs leading-relaxed text-text-tertiary">{cond.inspectionNote}</div>
+            </div>
+            <Button variant="secondary" onClick={onContinue}>
+              Log and move on <span className="font-mono-tech text-[10px] opacity-70">[E]</span>
             </Button>
           </CenterPrompt>
         )}

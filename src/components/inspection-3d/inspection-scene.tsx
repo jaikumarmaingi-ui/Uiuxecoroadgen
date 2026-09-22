@@ -19,6 +19,8 @@ import * as THREE from "three";
 import type { RoadSegment } from "@/lib/types";
 import { PavementCrossSection } from "./pavement-cross-section";
 import { Atmosphere } from "./scene/atmosphere";
+import { FloodWater } from "./scene/flood-water";
+import { CONDITIONS, type CorridorCondition } from "@/lib/inspection-3d/conditions";
 import { CorridorEnvironment } from "./scene/corridor-environment";
 import { FailureSurfaces } from "./scene/failure-surfaces";
 import { DefectMarkers } from "./scene/defect-markers";
@@ -66,6 +68,7 @@ const BASE_FOV = 52;
 export function InspectionScene({
   flow,
   regime,
+  condition = "clear",
   segment,
   defects,
   activeDefect,
@@ -77,6 +80,7 @@ export function InspectionScene({
 }: {
   flow: FlowState;
   regime: CorridorRegime;
+  condition?: CorridorCondition;
   segment: RoadSegment;
   defects: CorridorDefect[];
   /** The defect being inspected, or the next one ahead while driving. */
@@ -87,6 +91,8 @@ export function InspectionScene({
   onApproach: (defect: CorridorDefect) => void;
   onSelectLayer: (index: number) => void;
 }) {
+  const fx = CONDITIONS[condition].fx;
+  const quakeT = useRef(0);
   const vehicleRef = useRef<THREE.Group>(null);
   const characterRef = useRef<THREE.Group>(null);
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
@@ -247,6 +253,26 @@ export function InspectionScene({
       camera.lookAt(lookTarget.current);
     }
 
+    /**
+     * Seismic shake.
+     *
+     * Applied after the look-at, or the camera would be re-aimed every frame
+     * and the shake would cancel itself out. Two frequencies rather than one,
+     * because a single sine reads as a wobble rather than ground motion, and
+     * an envelope on top so it arrives in pulses — a quake is not a constant
+     * vibration, and a constant one would just make the scene unreadable.
+     */
+    if (fx.shake > 0) {
+      quakeT.current += delta;
+      const t = quakeT.current;
+      const envelope = 0.45 + 0.55 * Math.pow(Math.max(0, Math.sin(t * 0.55)), 2);
+      const amp = fx.shake * envelope;
+      camera.position.x += (Math.sin(t * 27) * 0.06 + Math.sin(t * 11.3) * 0.035) * amp;
+      camera.position.y += (Math.sin(t * 31.7) * 0.045 + Math.cos(t * 9.1) * 0.03) * amp;
+      camera.position.z += Math.cos(t * 23.4) * 0.04 * amp;
+      camera.rotation.z += Math.sin(t * 19.2) * 0.004 * amp;
+    }
+
     if (Math.abs(camera.fov - desiredFov) > 0.01) {
       camera.fov = THREE.MathUtils.damp(camera.fov, desiredFov, 3, delta);
       camera.updateProjectionMatrix();
@@ -300,9 +326,10 @@ export function InspectionScene({
 
   return (
     <>
-      <Atmosphere regime={regime} focusZRef={focusZ} />
+      <Atmosphere regime={regime} condition={condition} focusZRef={focusZ} />
 
-      <CorridorEnvironment regime={regime} pit={pit} />
+      <CorridorEnvironment regime={regime} condition={condition} pit={pit} />
+      <FloodWater depth={fx.standingWater} />
       <CorridorSign regime={regime} />
 
       <FailureSurfaces defects={defects} excludeId={pitDefect?.id ?? null} />

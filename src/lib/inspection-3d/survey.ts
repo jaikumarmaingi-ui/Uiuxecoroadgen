@@ -39,6 +39,18 @@ export interface SurveyEntry {
   suitabilityScore: number;
   expectedLifeYears: [number, number];
   inspectedIso: string;
+  /** Conditions the observation was made under. */
+  conditionLabel: string;
+  /**
+   * Whether a core was actually cut and read.
+   *
+   * Some conditions block the trial pit, and the defect is then classified
+   * from the vehicle. The package has to carry that distinction: whoever
+   * schedules the work needs to know which entries rest on a core and which
+   * rest on a look through a sandstorm, and a confidence percentage alone
+   * does not say which kind of reading it is.
+   */
+  coreVerified: boolean;
 }
 
 export interface CorridorSurvey {
@@ -58,6 +70,10 @@ export function makeEntry(
   defect: CorridorDefect,
   diagnosis: DefectDiagnosis,
   quote: TreatmentQuote,
+  opts: { conditionLabel: string; coreVerified: boolean } = {
+    conditionLabel: "Clear",
+    coreVerified: true,
+  },
 ): SurveyEntry {
   return {
     defectId: defect.id,
@@ -84,6 +100,8 @@ export function makeEntry(
     suitabilityScore: quote.suitabilityScore,
     expectedLifeYears: quote.def.expectedLifeYears,
     inspectedIso: new Date().toISOString(),
+    conditionLabel: opts.conditionLabel,
+    coreVerified: opts.coreVerified,
   };
 }
 
@@ -140,6 +158,8 @@ export interface SurveyTotals {
   structuralCount: number;
   /** Jobs whose intervention window closes within 30 days. */
   urgentCount: number;
+  /** Jobs classified from the vehicle because conditions blocked the pit. */
+  visualOnlyCount: number;
   /** Shortest window across the package — when the programme has to start. */
   soonestWindowDays: number | null;
   worstSeverity: FailureSeverity | null;
@@ -177,6 +197,7 @@ export function surveyTotals(survey: CorridorSurvey): SurveyTotals {
     avgRecycledPct: e.length ? Math.round(sum((x) => x.recycledPct) / e.length) : 0,
     structuralCount: e.filter((x) => x.structural).length,
     urgentCount: e.filter((x) => x.timeToInterventionDays <= 30).length,
+    visualOnlyCount: e.filter((x) => !x.coreVerified).length,
     soonestWindowDays: e.length ? Math.min(...e.map((x) => x.timeToInterventionDays)) : null,
     worstSeverity,
   };
