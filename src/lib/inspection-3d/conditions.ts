@@ -259,8 +259,8 @@ export const CONDITIONS: Record<CorridorCondition, ConditionSpec> = {
       "Wind-driven sand strips the binder film off the aggregate and scours the surface texture. Drifts bury the carriageway edge, and the abrasion accelerates ravelling well beyond its normal rate.",
     env: {
       ...NO_SHIFT,
-      fogNearMul: 0.24,
-      fogFarMul: 0.16,
+      fogNearMul: 0.1,
+      fogFarMul: 0.055,
       fogColor: "#b08d5c",
       exposureMul: 0.92,
       sunIntensityMul: 0.3,
@@ -295,8 +295,8 @@ export const CONDITIONS: Record<CorridorCondition, ConditionSpec> = {
       "The cut face has given way. Debris on the carriageway punches through the bound layers where it lands, and the slope above stays unstable until it is scaled — the failure is as much an access problem as a pavement one.",
     env: {
       ...NO_SHIFT,
-      fogNearMul: 0.6,
-      fogFarMul: 0.5,
+      fogNearMul: 0.42,
+      fogFarMul: 0.3,
       fogColor: "#7a6a5c",
       exposureMul: 0.85,
       sunIntensityMul: 0.55,

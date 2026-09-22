@@ -57,9 +57,12 @@ function makeField(count: number): ParticleField {
 }
 
 const PROFILES: Record<"rain" | "snow" | "dust", Profile> = {
-  rain: { count: 2600, fall: 34, drift: 7, size: 0.055, color: "#b9cddd", opacity: 0.5, stretch: 9, flutter: 0 },
-  snow: { count: 1700, fall: 3.2, drift: 4.5, size: 0.14, color: "#f2f7fb", opacity: 0.85, stretch: 1, flutter: 1.4 },
-  dust: { count: 2200, fall: 1.1, drift: 26, size: 0.2, color: "#c9a475", opacity: 0.32, stretch: 1.6, flutter: 2.2 },
+  rain: { count: 3000, fall: 34, drift: 7, size: 0.045, color: "#b9cddd", opacity: 0.5, stretch: 10, flutter: 0 },
+  // Snow and dust were drawn at a size that read as floating slabs rather than
+  // flakes and grains. Smaller and far more numerous costs the same on an
+  // instanced draw and reads as weather instead of debris.
+  snow: { count: 4200, fall: 3.2, drift: 4.5, size: 0.055, color: "#f2f7fb", opacity: 0.9, stretch: 1, flutter: 1.4 },
+  dust: { count: 5200, fall: 1.1, drift: 26, size: 0.07, color: "#c9a475", opacity: 0.4, stretch: 1.8, flutter: 2.2 },
 };
 
 export function Precipitation({ spec }: { spec: ConditionSpec }) {

@@ -20,6 +20,7 @@ import type { RoadSegment } from "@/lib/types";
 import { PavementCrossSection } from "./pavement-cross-section";
 import { Atmosphere } from "./scene/atmosphere";
 import { FloodWater } from "./scene/flood-water";
+import { SlopeDebris } from "./scene/slope-debris";
 import { CONDITIONS, type CorridorCondition } from "@/lib/inspection-3d/conditions";
 import { CorridorEnvironment } from "./scene/corridor-environment";
 import { FailureSurfaces } from "./scene/failure-surfaces";
@@ -330,6 +331,7 @@ export function InspectionScene({
 
       <CorridorEnvironment regime={regime} condition={condition} pit={pit} />
       <FloodWater depth={fx.standingWater} />
+      <SlopeDebris regime={regime} amount={fx.slopeDebris} />
       <CorridorSign regime={regime} />
 
       <FailureSurfaces defects={defects} excludeId={pitDefect?.id ?? null} />
