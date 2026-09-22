@@ -259,8 +259,13 @@ export const CONDITIONS: Record<CorridorCondition, ConditionSpec> = {
       "Wind-driven sand strips the binder film off the aggregate and scours the surface texture. Drifts bury the carriageway edge, and the abrasion accelerates ravelling well beyond its normal rate.",
     env: {
       ...NO_SHIFT,
-      fogNearMul: 0.1,
-      fogFarMul: 0.055,
+      // Desert's base fog is near 100 / far 560, so these multipliers set the
+      // whiteout distance at about 78 units. An earlier pass took them to
+      // 0.1/0.055, which put it at 31 — closer than the chase camera sits
+      // behind the vehicle, leaving nothing on screen to drive by. Tight
+      // enough to justify blocking the trial pit, far enough to drive.
+      fogNearMul: 0.2,
+      fogFarMul: 0.14,
       fogColor: "#b08d5c",
       exposureMul: 0.92,
       sunIntensityMul: 0.3,
