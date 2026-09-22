@@ -108,6 +108,24 @@ export default function SurveyReportPage() {
         </div>
       </Card>
 
+      {t.visualOnlyCount > 0 && (
+        <Card className="border-moderate/30 bg-moderate/[0.05] p-4">
+          <div className="flex items-start gap-2.5">
+            <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-moderate" />
+            <div>
+              <div className="font-display text-sm font-bold text-moderate">
+                {t.visualOnlyCount} of {t.inspected} jobs classified without a core
+              </div>
+              <p className="mt-1 text-xs leading-relaxed text-text-secondary">
+                Conditions blocked the trial pit, so these defects were classified from the vehicle. The
+                originating layer is inferred from the mechanism rather than read off a core, and the
+                treatment against it should be treated as provisional until the corridor can be re-surveyed.
+              </p>
+            </div>
+          </div>
+        </Card>
+      )}
+
       {t.urgentCount > 0 && (
         <Card className="border-critical/30 bg-critical/[0.05] p-4">
           <div className="flex items-start gap-2.5">
@@ -211,6 +229,8 @@ export default function SurveyReportPage() {
                   )}
                   {e.recycledPct > 0 && <Badge tone="cyan">{e.recycledPct}% recycled</Badge>}
                   <Badge tone="neutral">Confidence {e.confidencePct}%</Badge>
+                  {e.conditionLabel !== "Clear" && <Badge tone="neutral">{e.conditionLabel}</Badge>}
+                  {!e.coreVerified && <Badge tone="amber">Visual only — no core</Badge>}
                 </div>
               </div>
             ))}

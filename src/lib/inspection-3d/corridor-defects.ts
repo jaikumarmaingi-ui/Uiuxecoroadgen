@@ -1,4 +1,5 @@
 import { CORRIDOR_REGIMES, FAILURE_META, type CorridorTerrain, type RoadFailureKind } from "./regimes";
+import { CONDITIONS, type CorridorCondition } from "./conditions";
 import { CHAINAGE_M_PER_UNIT, ROAD_END_Z, ROAD_START_Z, ROAD_WIDTH_M } from "./terrain";
 
 /**
@@ -114,7 +115,28 @@ export interface CorridorDefectsOptions {
   count?: number;
   /** Extra seed offset, so two corridors of the same regime can differ. */
   seed?: number;
+  /**
+   * Conditions the corridor is being surveyed under.
+   *
+   * These bias which mechanisms occur rather than just tinting the sky: a
+   * corridor surveyed in flood throws settlement and washout, the same
+   * corridor in a sandstorm throws ravelling. A condition that leaves the
+   * failures unchanged would be contradicting the model this product argues
+   * for, which is that weather is how terrain does its damage.
+   */
+  condition?: CorridorCondition;
 }
+
+/** Seeded per condition so each scenario is stable but distinct. */
+const CONDITION_SEED: Record<CorridorCondition, number> = {
+  clear: 0,
+  rain: 1_301,
+  flood: 2_609,
+  snow: 3_907,
+  sandstorm: 5_113,
+  landslide: 6_421,
+  quake: 7_727,
+};
 
 /** Seeded per regime so a given corridor is stable across visits. */
 const REGIME_SEED: Record<CorridorTerrain, number> = {
@@ -130,10 +152,28 @@ export function generateCorridorDefects(
   opts: CorridorDefectsOptions = {},
 ): CorridorDefect[] {
   const regime = CORRIDOR_REGIMES[terrain];
-  const { count = 8, seed = 0 } = opts;
-  const rng = mulberry32(REGIME_SEED[terrain] + seed);
+  const { count = 8, seed = 0, condition = "clear" } = opts;
+  // The condition is part of the seed, so switching it re-rolls the corridor
+  // rather than relabelling the same eight defects.
+  const rng = mulberry32(REGIME_SEED[terrain] + seed + CONDITION_SEED[condition]);
 
-  const weights = Object.entries(regime.failureWeights) as [RoadFailureKind, number][];
+  const bias = CONDITIONS[condition].failureBias;
+  // The bias is softened rather than applied raw. A strong multiplier on a
+  // mechanism the corridor already favours compounds into a monoculture —
+  // desert under seismic load returned six identical defects out of eight,
+  // which reads as a broken generator rather than a corridor. The exponent
+  // keeps the condition's mechanism clearly dominant while leaving the
+  // secondary ones the survey would also flag.
+  const weights = (Object.entries(regime.failureWeights) as [RoadFailureKind, number][])
+    .map(([kind, w]) => {
+      const b = bias[kind];
+      if (b === undefined) return [kind, w] as [RoadFailureKind, number];
+      return [kind, w * (b === 0 ? 0 : Math.pow(b, 0.7))] as [RoadFailureKind, number];
+    })
+    // A bias of 0 means the condition makes that mechanism impossible — frost
+    // heave in a sandstorm, washout with no water — so drop it entirely
+    // rather than leaving it pickable at a vanishing weight.
+    .filter(([, w]) => w > 0.0001);
   // Leave a run-up at the start and a tail at the end so the first failure is
   // not on top of the vehicle and the last is not at the edge of the world.
   const firstZ = ROAD_START_Z - 110;

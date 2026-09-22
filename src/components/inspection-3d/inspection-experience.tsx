@@ -19,6 +19,8 @@ import { createInitialWorld, START_Z, type FlowState, type WorldRefState } from 
 import { InspectionScene } from "./inspection-scene";
 import { InspectionHUD } from "./inspection-hud";
 import { CorridorSelector } from "./corridor-selector";
+import { ConditionSelector } from "./condition-selector";
+import { CONDITIONS, conditionAllowed, type CorridorCondition } from "@/lib/inspection-3d/conditions";
 
 const SEGMENT_ID = "nh3-srn-leh-210";
 const ANALYSIS_DURATION_MS = 1900;
@@ -26,6 +28,7 @@ const ANALYSIS_DURATION_MS = 1900;
 export function InspectionExperience() {
   const segment = useMemo(() => getSegment(SEGMENT_ID)!, []);
   const [terrain, setTerrain] = useState<CorridorTerrain>("mountain");
+  const [condition, setCondition] = useState<CorridorCondition>("clear");
   const [flow, setFlow] = useState<FlowState>("intro");
   const [selectedLayer, setSelectedLayer] = useState<number | null>(null);
   /** Index into `defects` of the failure being driven to / inspected. */
@@ -38,7 +41,10 @@ export function InspectionExperience() {
   const keys = useRef<Set<string>>(new Set());
 
   const regime = CORRIDOR_REGIMES[terrain];
-  const defects = useMemo(() => generateCorridorDefects(terrain), [terrain]);
+  const defects = useMemo(
+    () => generateCorridorDefects(terrain, { condition }),
+    [terrain, condition],
+  );
   const activeDefect: CorridorDefect | null = defects[activeIndex] ?? null;
   const defectCount = defects.length;
   const remaining = Math.max(0, defects.length - inspectedIds.length);
@@ -72,10 +78,25 @@ export function InspectionExperience() {
     (next: CorridorTerrain) => {
       if (next === terrain) return;
       setTerrain(next);
+      // Snow in the Thar is not a scenario. Rather than silently surveying
+      // under a condition the corridor cannot have, fall back to clear.
+      setCondition((c) => (conditionAllowed(c, next) ? c : "clear"));
       resetWorld();
       setFlow("intro");
     },
     [terrain, resetWorld],
+  );
+
+  const selectCondition = useCallback(
+    (next: CorridorCondition) => {
+      if (next === condition) return;
+      setCondition(next);
+      // The condition re-rolls the corridor's failures, so an inspection in
+      // progress is against a corridor that no longer exists.
+      resetWorld();
+      setFlow("intro");
+    },
+    [condition, resetWorld],
   );
 
   // A new corridor is a new survey: carrying entries across would produce a
@@ -86,7 +107,7 @@ export function InspectionExperience() {
     saveSurvey(
       surveyFrom(CORRIDOR_REGIMES[terrain], ROAD_LENGTH_M, defectCount, startedIsoRef.current, []),
     );
-  }, [terrain, defectCount]);
+  }, [terrain, condition, defectCount]);
 
   /**
    * The work package being assembled, kept in a ref because it is an output of
@@ -110,9 +131,15 @@ export function InspectionExperience() {
    */
   const commitInspection = useCallback(
     (defect: CorridorDefect, quote?: TreatmentQuote) => {
-      const diagnosis = diagnoseDefect(defect, regime);
+      const diagnosis = diagnoseDefect(defect, regime, condition);
       const chosenQuote = quote ?? matchTreatments(defect, diagnosis, regime).recommended;
-      entriesRef.current.set(defect.id, makeEntry(defect, diagnosis, chosenQuote));
+      entriesRef.current.set(
+        defect.id,
+        makeEntry(defect, diagnosis, chosenQuote, {
+          conditionLabel: CONDITIONS[condition].label,
+          coreVerified: CONDITIONS[condition].inspectable,
+        }),
+      );
       saveSurvey(
         surveyFrom(
           regime,
@@ -123,7 +150,7 @@ export function InspectionExperience() {
         ),
       );
     },
-    [regime, defectCount],
+    [regime, defectCount, condition],
   );
 
   const chooseTreatment = useCallback(
@@ -167,6 +194,10 @@ export function InspectionExperience() {
   const continueToNext = useCallback(() => {
     if (activeDefect) {
       setInspectedIds((prev) => (prev.includes(activeDefect.id) ? prev : [...prev, activeDefect.id]));
+      // Where conditions block the pit the flow never reaches "results", so
+      // the entry is recorded here instead. The defect was still observed —
+      // it just was not cored, which the entry says.
+      if (!CONDITIONS[condition].inspectable) commitInspection(activeDefect);
     }
     setSelectedLayer(null);
     const world = worldRef.current;
@@ -174,7 +205,7 @@ export function InspectionExperience() {
     world.vehicle.speed = 0;
     setActiveIndex((i) => Math.min(defects.length - 1, i + 1));
     setFlow("driving");
-  }, [activeDefect, defects.length]);
+  }, [activeDefect, defects.length, condition, commitInspection]);
 
   const restart = useCallback(() => {
     resetWorld();
@@ -197,13 +228,16 @@ export function InspectionExperience() {
       if (e.key.toLowerCase() !== "e") return;
       if (flow === "approaching") stopAndInspect();
       else if (flow === "parked") getOut();
-      else if (flow === "onfoot") inspectRoad();
+      else if (flow === "onfoot") {
+        if (CONDITIONS[condition].inspectable) inspectRoad();
+        else continueToNext();
+      }
       else if (flow === "exploded") triggerAI();
       else if (flow === "results") continueToNext();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [flow, stopAndInspect, getOut, inspectRoad, triggerAI, continueToNext]);
+  }, [flow, condition, stopAndInspect, getOut, inspectRoad, triggerAI, continueToNext]);
 
   const isLast = activeIndex >= defects.length - 1;
 
@@ -220,13 +254,14 @@ export function InspectionExperience() {
           // Filmic tone mapping is what stops a bright sun blowing the road
           // surface to white and lets the shadow side keep detail.
           toneMapping: THREE.ACESFilmicToneMapping,
-          toneMappingExposure: regime.sky.exposure,
+            toneMappingExposure: regime.sky.exposure * CONDITIONS[condition].env.exposureMul,
         }}
       >
         <InspectionScene
-          key={terrain}
+          key={`${terrain}-${condition}`}
           flow={flow}
           regime={regime}
+          condition={condition}
           segment={segment}
           defects={defects}
           activeDefect={activeDefect}
@@ -239,11 +274,18 @@ export function InspectionExperience() {
       </Canvas>
 
       <CorridorSelector active={terrain} onSelect={selectTerrain} disabled={flow !== "intro" && flow !== "driving"} />
+      <ConditionSelector
+        terrain={terrain}
+        active={condition}
+        onSelect={selectCondition}
+        disabled={flow !== "intro" && flow !== "driving"}
+      />
 
       <InspectionHUD
         flow={flow}
         segment={segment}
         regime={regime}
+        condition={condition}
         defects={defects}
         activeDefect={activeDefect}
         defectIndex={activeIndex}

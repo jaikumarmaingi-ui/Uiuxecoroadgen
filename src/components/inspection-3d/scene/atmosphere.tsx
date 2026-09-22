@@ -5,6 +5,8 @@ import { useFrame } from "@react-three/fiber";
 import { Environment, Sky } from "@react-three/drei";
 import * as THREE from "three";
 import type { CorridorRegime } from "@/lib/inspection-3d/regimes";
+import { CONDITIONS, type CorridorCondition } from "@/lib/inspection-3d/conditions";
+import { Precipitation } from "./precipitation";
 
 /**
  * Sky, sun and haze for a corridor.
@@ -23,13 +25,38 @@ import type { CorridorRegime } from "@/lib/inspection-3d/regimes";
  */
 export function Atmosphere({
   regime,
+  condition = "clear",
   focusZRef,
 }: {
   regime: CorridorRegime;
+  /** Survey conditions, which shift the regime's own sky rather than replace it. */
+  condition?: CorridorCondition;
   /** World Z the shadow frustum should stay centred on. */
   focusZRef?: React.RefObject<number>;
 }) {
-  const s = regime.sky;
+  const spec = CONDITIONS[condition];
+
+  /**
+   * The condition modulates the regime's sky rather than supplying its own.
+   *
+   * Rain over the Thar and rain over Assam should not look the same — the
+   * light, the haze colour and the sun angle still belong to the corridor.
+   * Multiplying keeps each regime's identity underneath the weather.
+   */
+  const s = useMemo(() => {
+    const e = spec.env;
+    const base = regime.sky;
+    return {
+      ...base,
+      turbidity: base.turbidity + e.turbidityAdd,
+      sunIntensity: base.sunIntensity * e.sunIntensityMul,
+      sunColor: e.sunColor ?? base.sunColor,
+      fogColor: e.fogColor ?? base.fogColor,
+      fogNear: base.fogNear * e.fogNearMul,
+      fogFar: base.fogFar * e.fogFarMul,
+      hemiIntensity: base.hemiIntensity * e.hemiIntensityMul,
+    };
+  }, [regime.sky, spec.env]);
   const sun = useMemo(() => new THREE.Vector3(...s.sunPosition), [s.sunPosition]);
 
   const rigRef = useRef<THREE.Group>(null);
@@ -59,7 +86,7 @@ export function Atmosphere({
           Rendering the sky into a small cubemap once (frames={1}) is enough,
           and costs nothing per frame. */}
       <Environment
-        key={`${regime.id}-probe`}
+        key={`${regime.id}-${condition}-probe`}
         frames={1}
         resolution={128}
         background={false}
@@ -106,6 +133,8 @@ export function Atmosphere({
           crushing to black once tone mapping is applied. */}
       <directionalLight position={[-sun.x, 26, -sun.z]} intensity={0.16} color="#9ec0e4" />
       <ambientLight intensity={0.04} />
+
+      <Precipitation spec={spec} />
     </>
   );
 }

@@ -49,6 +49,56 @@ function profileEval(stops: readonly ProfileStop[], d: number): number {
   return stops[stops.length - 1][1];
 }
 
+/** How far out from the bench edge the talus apron reaches, in world units. */
+const TALUS_REACH = 17;
+
+/**
+ * Bedding planes in the exposed rock.
+ *
+ * Strata are near-horizontal but rarely level: the plane is tilted slightly
+ * across and along the corridor so the bands cut the cut face at an angle
+ * rather than ringing it like contour lines, which is what gives a rock cut
+ * its direction. Returns a signed value in roughly [-1, 1], sharpened so the
+ * resistant beds read as distinct courses rather than a sine wash.
+ */
+function beddingWave(x: number, z: number): number {
+  const plane = x * 0.09 + z * 0.035;
+  const w = Math.sin((plane * 0.5 + 1) * 1.7 + Math.sin(plane * 0.21) * 1.4);
+  // Push toward the extremes so beds have edges.
+  return Math.sign(w) * Math.pow(Math.abs(w), 0.55);
+}
+
+/**
+ * The talus apron banked against the toe of the cut face.
+ *
+ * The cut profile leaves the bench edge at between 40 and 60 degrees, which is
+ * steeper than the angle of repose along its whole length. Nothing can rest on
+ * a face that steep: debris rolls to the bottom and piles where the face meets
+ * the bench, which is exactly what the catch ditch at the toe of a road cut is
+ * dug to hold. So the apron is deepest against the toe and thins upslope —
+ * banked against the face rather than lying on it.
+ *
+ * It is not an even berm either. Debris is funnelled down gullies and piles
+ * into cones that coalesce at their feet, so the depth is modulated along the
+ * corridor and sharpened, which leaves distinct lobes with starved ground
+ * between them.
+ *
+ * The ramp-in over the first metre keeps the bench itself exactly flat: a pile
+ * that stepped straight up off the shoulder would be a wall, and the shoulder
+ * has to stay parkable.
+ */
+function talusApron(regime: CorridorRegime, lat: number, z: number): number {
+  if (regime.talus <= 0.001) return 0;
+  const d = lat - BENCH_HALF;
+  if (d <= 0 || d >= TALUS_REACH) return 0;
+  const u = d / TALUS_REACH;
+  const wedge = smoothstep(0, 0.07, u) * Math.pow(1 - smoothstep(0.06, 1, u), 1.5);
+  // Cone spacing along the corridor; sharpened so the lobes are distinct.
+  const feed = fbm(z * 0.021, 41.7, SEED + 61, 2) * 0.5 + 0.5;
+  const cones = 0.3 + 0.7 * Math.pow(feed, 1.7);
+  return wedge * cones * regime.talus;
+}
+
 /** Terrain height at a world-space point. Exactly 0 across the road bench. */
 export function corridorHeight(regime: CorridorRegime, x: number, z: number): number {
   const lat = Math.abs(x);
@@ -74,14 +124,49 @@ export function corridorHeight(regime: CorridorRegime, x: number, z: number): nu
     h += (ridge * 0.72 + (rolling * 0.5 + 0.5) * 0.28 - 0.34) * farAmp;
   }
 
-  // A range closing the far end of the corridor. It rises everywhere, but more
-  // slowly on the corridor line, so the road runs into distant ground rather
-  // than into a blown-out patch of sky at the vanishing point.
-  const ahead = smoothstep(1180, 1420, -z) * (0.3 + 0.7 * smoothstep(14, 62, lat));
+  // A range closing the far end of the corridor, in two parts.
+  //
+  // It used to rise everywhere at a 30% floor, including straight along the
+  // corridor line. That was tuned when the drivable stretch was short; at
+  // 1.55 km the road now reaches into it, and the last 175 m of carriageway
+  // ran *inside* the hillside — the centreline is 22 m underground at the end
+  // of the road. Fog hid it from the start line, and the eight flagged
+  // failures all sit before it, so the inspection flow never met it; drive
+  // past the last failure, as the chainage strip invites, and you drive into
+  // a mountain.
+  //
+  // So the flanks close the view from beyond the bench, where they can rise
+  // as steeply as they like, and the centre closes only past the end of the
+  // road, which keeps the vanishing point full of ground without ever putting
+  // ground on top of the carriageway.
+  const aheadFlanks = smoothstep(1180, 1420, -z) * smoothstep(BENCH_HALF + 2, 62, lat);
+  const roadEnd = -ROAD_END_Z;
+  const aheadCentre = smoothstep(roadEnd, roadEnd + 62, -z) * 0.6;
+  const ahead = Math.min(1, aheadFlanks + aheadCentre);
   if (ahead > 0.01) {
     const ridge = ridgedNoise(x * 0.009 * s, z * 0.009 * s, SEED + 23);
     h += ahead * (regime.aheadHeight + ridge * regime.aheadHeight * 1.7);
   }
+
+  // Both of the following belong to the cut face, which is the negative-X
+  // side. The fill side is an embankment falling away to the valley: it is
+  // placed material with nothing above it to shed, so banking debris against
+  // it or cutting strata into it would describe a slope that is not there.
+  const isCutSide = x < 0;
+
+  // Resistant beds stand proud of the softer courses between them. Only on
+  // ground steep enough to be an exposed face — bedding does not emboss the
+  // graded bench or the valley floor — and it fades out with distance, where
+  // the stations are too coarse to resolve it and it would only alias.
+  if (isCutSide && regime.bedding > 0.001) {
+    const exposure = smoothstep(BENCH_HALF + 2, BENCH_HALF + 9, lat) * (1 - smoothstep(60, 130, lat));
+    if (exposure > 0.01) {
+      h += beddingWave(x, z) * 0.85 * regime.bedding * exposure;
+    }
+  }
+
+  // Debris shed off the cut face, piled at its foot.
+  if (isCutSide) h += talusApron(regime, lat, z);
 
   return h;
 }
@@ -319,11 +404,30 @@ export function buildCorridorTerrain(
 
       // Rock on steep ground, soil and scree where it can settle.
       let color = mix3(palette.soil, palette.scree, smoothstep(0.1, 0.5, slope));
-      color = mix3(
-        color,
-        mix3(palette.rockDark, palette.rockLight, Math.min(1, slope * 0.9)),
-        smoothstep(rockLo, rockHi, slope),
-      );
+      let rock = mix3(palette.rockDark, palette.rockLight, Math.min(1, slope * 0.9));
+
+      // Bedding: alternating courses of harder and softer rock. Tinting the
+      // beds is what actually sells the strata — the geometric relief alone is
+      // a few centimetres and reads as noise without a colour difference to
+      // separate one course from the next.
+      if (regime.bedding > 0.001 && x < 0) {
+        const bed = beddingWave(x, z);
+        const bandLo = mix3(palette.rockDark, [0.09, 0.08, 0.075], 0.35);
+        const bandHi = mix3(palette.rockLight, [0.74, 0.70, 0.64], 0.3);
+        rock = mix3(rock, bed > 0 ? bandHi : bandLo, Math.abs(bed) * 0.55 * regime.bedding);
+      }
+
+      color = mix3(color, rock, smoothstep(rockLo, rockHi, slope));
+
+      // The talus apron is loose broken rock, not the face it fell from: it
+      // sits at the angle of repose, so the slope test alone would colour it
+      // as soil and it would disappear into the bench.
+      const talus = x < 0 ? talusApron(regime, -x, z) : 0;
+      if (talus > 0.01) {
+        const cover = Math.min(1, talus / Math.max(0.35, regime.talus * 0.55));
+        const debris = mix3(palette.scree, palette.rockDark, 0.32);
+        color = mix3(color, debris, cover * 0.75);
+      }
 
       // Vegetation takes hold on gentle ground, in patches rather than evenly.
       if (palette.verdure) {

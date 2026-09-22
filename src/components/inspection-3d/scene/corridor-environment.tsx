@@ -16,6 +16,7 @@ import {
   type PitCut,
 } from "@/lib/inspection-3d/terrain";
 import type { CorridorRegime } from "@/lib/inspection-3d/regimes";
+import { CONDITIONS, type CorridorCondition } from "@/lib/inspection-3d/conditions";
 import {
   makeGravelMaps,
   makeRoadMaps,
@@ -47,14 +48,41 @@ const REGIME_SEED: Record<string, number> = {
 /** Terrain, carriageway, shoulders and roadside furniture for the corridor. */
 export function CorridorEnvironment({
   regime,
+  condition = "clear",
   distress,
   pit,
 }: {
   regime: CorridorRegime;
+  condition?: CorridorCondition;
   distress?: number;
   pit?: PitCut;
 }) {
   const surfaceDistress = distress ?? regime.surfaceDistress;
+  const fx = CONDITIONS[condition].fx;
+
+  /**
+   * How the ground reads under the condition.
+   *
+   * Wet asphalt is darker and far less rough, which is what makes it mirror
+   * the sky — the reflection probe is already there for exactly this. Snow
+   * does the opposite: it lightens the surface and kills the reflection. Both
+   * are applied as a tint and a roughness shift over the existing maps rather
+   * than as new textures, so the distress baked into the road map still shows
+   * through the weather instead of being painted over by it.
+   */
+  const surface = useMemo(() => {
+    const wet = fx.surfaceWet;
+    const snow = fx.surfaceSnow;
+    const tint = new THREE.Color("#ffffff");
+    if (wet > 0) tint.lerp(new THREE.Color("#6f7a84"), wet * 0.55);
+    if (snow > 0) tint.lerp(new THREE.Color("#e8eef4"), snow * 0.7);
+    return {
+      tint,
+      roughness: Math.max(0.12, 1 - wet * 0.8 + snow * 0),
+      metalness: 0.02 + wet * 0.22,
+      envIntensity: 0.45 + wet * 1.5,
+    };
+  }, [fx.surfaceWet, fx.surfaceSnow]);
   const terrain = useMemo(() => buildCorridorTerrain(regime, { pit }), [regime, pit]);
   const roadGeometry = useMemo(() => buildRoadGeometry({ pit }), [pit]);
 
@@ -197,6 +225,16 @@ export function CorridorEnvironment({
 
   const barrierX = ROAD_WIDTH_M / 2 + shoulderWidth * 0.62;
 
+  // Open ground takes snow and the dust-storm cast, but not the wet sheen:
+  // rain on rock does not mirror the sky the way it does on a sealed surface.
+  const groundTint = useMemo(() => {
+    const c = new THREE.Color("#ffffff");
+    if (fx.surfaceSnow > 0) c.lerp(new THREE.Color("#e6edf3"), fx.surfaceSnow * 0.55);
+    if (fx.surfaceWet > 0) c.lerp(new THREE.Color("#8d9299"), fx.surfaceWet * 0.25);
+    if (fx.precip === "dust") c.lerp(new THREE.Color("#c2a077"), 0.35);
+    return c;
+  }, [fx.surfaceSnow, fx.surfaceWet, fx.precip]);
+
   return (
     <group>
       <mesh geometry={terrain.geometry} receiveShadow castShadow>
@@ -205,6 +243,7 @@ export function CorridorEnvironment({
           map={terrainMaps.map}
           normalMap={terrainMaps.normalMap}
           roughnessMap={terrainMaps.roughnessMap}
+          color={groundTint}
           normalScale={new THREE.Vector2(0.85, 0.85)}
           roughness={1}
           metalness={0.015}
@@ -226,8 +265,9 @@ export function CorridorEnvironment({
             map={gravelMaps.map}
             normalMap={gravelMaps.normalMap}
             roughnessMap={gravelMaps.roughnessMap}
+            color={surface.tint}
             normalScale={new THREE.Vector2(1.1, 1.1)}
-            roughness={1}
+            roughness={Math.max(0.4, surface.roughness)}
             metalness={0}
             dithering
           />
@@ -240,9 +280,11 @@ export function CorridorEnvironment({
           map={roadMaps.map}
           normalMap={roadMaps.normalMap}
           roughnessMap={roadMaps.roughnessMap}
+          color={surface.tint}
           normalScale={new THREE.Vector2(1.25, 1.25)}
-          roughness={1}
-          metalness={0.02}
+          roughness={surface.roughness}
+          metalness={surface.metalness}
+          envMapIntensity={surface.envIntensity}
           dithering
         />
       </mesh>

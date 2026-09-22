@@ -1,5 +1,6 @@
 import { CORRIDOR_REGIMES, FAILURE_META, type CorridorRegime, type RoadFailureKind } from "./regimes";
 import type { CorridorDefect, FailureSeverity } from "./corridor-defects";
+import { CONDITIONS, type CorridorCondition } from "./conditions";
 import type { DeteriorationPoint, FeatureContribution } from "@/lib/types";
 
 /**
@@ -164,6 +165,8 @@ export interface DefectDiagnosis {
   /** Days before the failure reaches the next layer down or closes a lane. */
   timeToInterventionDays: number;
   confidencePct: number;
+  /** The condition the survey was taken under. */
+  condition: CorridorCondition;
 }
 
 /**
@@ -212,7 +215,12 @@ function decayPerMonth(defect: CorridorDefect, structural: boolean): number {
   return bySeverity * (structural ? 1.35 : 1);
 }
 
-export function diagnoseDefect(defect: CorridorDefect, regime: CorridorRegime): DefectDiagnosis {
+export function diagnoseDefect(
+  defect: CorridorDefect,
+  regime: CorridorRegime,
+  condition: CorridorCondition = "clear",
+): DefectDiagnosis {
+  const cond = CONDITIONS[condition];
   const meta = FAILURE_META[defect.kind];
   const originLayer = ORIGIN_LAYER_KEY[defect.kind];
   const structural = isStructural(defect.kind);
@@ -228,10 +236,20 @@ export function diagnoseDefect(defect: CorridorDefect, regime: CorridorRegime): 
     weight: weight * (0.88 + ((jitter * (i + 3)) % 1) * 0.24),
   }));
   const sum = raw.reduce((s, r) => s + r.weight, 0);
+  // A condition that is driving the failure belongs in the attribution, not
+  // just in the sky. Its share is taken out of the terrain drivers rather
+  // than added on top, so the shares still describe one finding.
+  const condShare = condition === "clear" ? 0 : Math.min(0.42, (cond.decayMul - 1) * 0.55 + 0.1);
   const contributions: FeatureContribution[] = raw.map((r) => ({
     factor: r.factor,
-    weight: Math.round((r.weight / sum) * 100),
+    weight: Math.round((r.weight / sum) * 100 * (1 - condShare)),
   }));
+  if (condShare > 0) {
+    contributions.unshift({
+      factor: `${cond.label} (survey conditions)`,
+      weight: Math.round(condShare * 100),
+    });
+  }
   // Independent rounding lands on 99 or 101 often enough to be noticed in a
   // panel that presents these as shares of the finding. The remainder goes on
   // the largest driver, where a single point is proportionally smallest.
@@ -241,7 +259,7 @@ export function diagnoseDefect(defect: CorridorDefect, regime: CorridorRegime): 
     largest.weight += drift;
   }
 
-  const decay = decayPerMonth(defect, structural);
+  const decay = decayPerMonth(defect, structural) * cond.decayMul;
   const forecast: DeteriorationPoint[] = [0, 1, 2, 3].map((m) => ({
     label: m === 0 ? "Now" : `${m * 30}d`,
     // Deterioration accelerates once water is in the structure, so the curve
@@ -267,6 +285,7 @@ export function diagnoseDefect(defect: CorridorDefect, regime: CorridorRegime): 
     `${meta.mechanism}`,
     `Here it presents ${side} over ${defect.lengthM.toFixed(1)} m × ${defect.widthM.toFixed(1)} m — ${areaM2} m² — and the core confirms the worst integrity at the ${LAYER_LABEL[originLayer].toLowerCase()}, ${corroboration(originLayer)}.`,
     `The corridor contributes ${TERRAIN_NOTE[regime.id]}.`,
+    ...(condition === "clear" ? [] : [cond.mechanism]),
     structural
       ? `Because the failure has reached the load-bearing structure, a surface treatment would close it visually and leave the cause in place; the defect would return within one season.`
       : `The failure is still confined above the base course, so a bound-layer treatment applied now restores the structure rather than deferring it.`,
@@ -282,10 +301,17 @@ export function diagnoseDefect(defect: CorridorDefect, regime: CorridorRegime): 
     contributions,
     forecast,
     timeToInterventionDays,
-    confidencePct: defect.confidencePct,
+    // A reading taken through standing water, snow cover or blowing sand is
+    // not as good a reading, and the panel should not claim otherwise.
+    confidencePct: Math.round(defect.confidencePct * cond.confidenceMul),
+    condition,
   };
 }
 
-export function diagnoseFor(defect: CorridorDefect, terrain: CorridorRegime["id"]): DefectDiagnosis {
-  return diagnoseDefect(defect, CORRIDOR_REGIMES[terrain]);
+export function diagnoseFor(
+  defect: CorridorDefect,
+  terrain: CorridorRegime["id"],
+  condition: CorridorCondition = "clear",
+): DefectDiagnosis {
+  return diagnoseDefect(defect, CORRIDOR_REGIMES[terrain], condition);
 }
